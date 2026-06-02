@@ -94,12 +94,15 @@ module Kafkaesque
 
       sasl_token = @config.settings["sasl.token"]? || @config.settings["sasl.password"]?
 
+      max_retries = (@config.settings["retries"]? || @config.settings["max_retries"]?).try(&.to_i) || 3
+
       # Create our main Client using connect_first
       client = Client.connect_first(
         servers: @config.bootstrap_servers,
         sasl_token: sasl_token,
         client_id: @config.settings["client.id"]? || "kafkaesque-producer",
-        oauth_token_provider: @config.oauth_token_provider
+        oauth_token_provider: @config.oauth_token_provider,
+        max_retries: max_retries
       )
 
       # Configure batch accumulator options from settings

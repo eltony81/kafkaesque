@@ -125,7 +125,7 @@ Environment variables take precedence over settings loaded from the YAML file.
 | `acks` | `String` | `1` | Number of broker acknowledgments required before completing write. Options: `all` (-1), `0` (no ack), `1` (leader ack). |
 | `linger.ms` | `String` | `0` | Delay (in milliseconds) to wait for additional messages to accumulate before sending a batch. |
 | `batch.num.messages` | `String` | `1000` | Maximum number of messages to bundle in a single batch. |
-| `retries` | `String` | `0` | Number of times to retry producing a message before failing. |
+| `retries` | `String` | `3` | Number of times to retry producing a message before failing. |
 | `retry.backoff.ms` | `String` | `100` | Time to wait before attempting a retry. |
 | `transactional.id` | `String` | `nil` | Unique ID enabling transactional delivery across restarts. |
 

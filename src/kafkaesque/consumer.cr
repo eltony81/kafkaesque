@@ -292,12 +292,14 @@ module Kafkaesque
 
     private def resolve_coordinator(group_id : String) : Client
       attempts = 0
+      max_retries = (@config.settings["retries"]? || @config.settings["max_retries"]?).try(&.to_i) || 3
       loop do
         bootstrap_client = Client.connect_first(
           servers: @config.bootstrap_servers,
           sasl_token: @config.sasl_token,
           client_id: "kafkaesque-consumer-bootstrap",
-          oauth_token_provider: @config.oauth_token_provider
+          oauth_token_provider: @config.oauth_token_provider,
+          max_retries: max_retries
         )
 
         coord_resp = bootstrap_client.find_coordinator(group_id)
@@ -309,7 +311,8 @@ module Kafkaesque
             port: coord_resp.port,
             sasl_token: @config.sasl_token,
             client_id: "kafkaesque-consumer",
-            oauth_token_provider: @config.oauth_token_provider
+            oauth_token_provider: @config.oauth_token_provider,
+            max_retries: max_retries
           )
           coord_client.connect
           return coord_client
@@ -531,11 +534,13 @@ module Kafkaesque
     end
 
     private def resolve_regex_topics(pattern : Regex)
+      max_retries = (@config.settings["retries"]? || @config.settings["max_retries"]?).try(&.to_i) || 3
       bootstrap_client = Client.connect_first(
         servers: @config.bootstrap_servers,
         sasl_token: @config.sasl_token,
         client_id: "kafkaesque-consumer-bootstrap",
-        oauth_token_provider: @config.oauth_token_provider
+        oauth_token_provider: @config.oauth_token_provider,
+        max_retries: max_retries
       )
       begin
         meta = bootstrap_client.fetch_metadata(nil)
