@@ -382,17 +382,17 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 
 | Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
 | :--- | :--- | :---: | :---: | :---: |
-| **Kafkaesque** | **Crystal** | **Pure Native** | **0.014s** | **7,142.8 msg/s** |
-| **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.116s** | **862.0 msg/s** |
-| **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.534s** | **187.2 msg/s** |
+| **Kafkaesque** | **Crystal** | **Pure Native** | **0.013s** | **7,692.3 msg/s** |
+| **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.112s** | **892.8 msg/s** |
+| **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.531s** | **188.3 msg/s** |
 
 ### 📥 Consumer Throughput (100 messages)
 
 | Client Engine | Language | Group Protocol | Execution Time | Throughput |
 | :--- | :--- | :---: | :---: | :---: |
-| **Kafkaesque** | **Crystal** | **KIP-848 (Next-Gen)** | **0.021s** | **4,756.3 msg/s** |
-| **Go Confluent** | **Go** | KIP-848 (Next-Gen) | **0.138s** | **721.9 msg/s** |
-| **Crafka** | **Crystal** | Classic | **3.170s** | **31.5 msg/s** |
+| **Kafkaesque** | **Crystal** | **KIP-848 (Next-Gen)** | **0.016s** | **6,356.1 msg/s** |
+| **Go Confluent** | **Go** | KIP-848 (Next-Gen) | **0.113s** | **887.5 msg/s** |
+| **Crafka** | **Crystal** | Classic | **3.170s** | **31.6 msg/s** |
 
 ---
 
