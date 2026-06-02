@@ -86,6 +86,7 @@ module Kafkaesque
     end
 
     getter config : Config
+    getter subscription_pattern : Regex? = nil
     getter assigned_partitions = [] of Int32
     @topics = [] of String
     @running = true
@@ -136,9 +137,18 @@ module Kafkaesque
       subscribe(topics.to_a)
     end
 
+    def subscribe(pattern : Regex)
+      @subscription_pattern = pattern
+    end
+
     def each(&block : Protocol::Record ->)
       if @config.bootstrap_servers.empty?
         raise "No bootstrap servers configured"
+      end
+
+      if pattern = @subscription_pattern
+        resolve_regex_topics(pattern)
+        spawn_regex_monitor_loop(pattern)
       end
 
       group_id = @config.settings["group.id"]? || "default-group"
@@ -517,6 +527,45 @@ module Kafkaesque
         end
         client.close
         @coordinator_client = nil
+      end
+    end
+
+    private def resolve_regex_topics(pattern : Regex)
+      bootstrap_client = Client.connect_first(
+        servers: @config.bootstrap_servers,
+        sasl_token: @config.sasl_token,
+        client_id: "kafkaesque-consumer-bootstrap",
+        oauth_token_provider: @config.oauth_token_provider
+      )
+      begin
+        meta = bootstrap_client.fetch_metadata(nil)
+        matched = [] of String
+        meta.topics.each do |topic_meta|
+          if topic_meta.name =~ pattern
+            matched << topic_meta.name
+          end
+        end
+        @topics = matched.sort
+      ensure
+        bootstrap_client.close rescue nil
+      end
+    end
+
+    private def spawn_regex_monitor_loop(pattern : Regex)
+      spawn do
+        while @running
+          sleep 10.seconds
+          break unless @running
+          begin
+            old_topics = @topics
+            resolve_regex_topics(pattern)
+            if old_topics != @topics
+              Log.info { "Regex subscription matched new topics: #{@topics}. Triggering membership update." }
+            end
+          rescue ex
+            # ignore background connection errors
+          end
+        end
       end
     end
   end
