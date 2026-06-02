@@ -264,6 +264,53 @@ end
 
 ---
 
+## API Reference
+
+### `Kafkaesque::ConfigLoader`
+Static utility module to load configurations.
+* **`self.load_producer_config(file_path : String) : Producer::Config`**: Reads a YAML file and overrides configurations using system environment variables.
+* **`self.load_consumer_config(file_path : String) : Consumer::Config`**: Same as above, returned as a Consumer configuration.
+
+---
+
+### `Kafkaesque::Producer`
+
+High-throughput, asynchronous client to write records to Kafka brokers.
+
+#### Constructor
+* **`Producer.new(config : Config)`**: Initializes a new producer with the given configuration.
+* **`Producer.new(&block : Config ->)`**: Block builder syntax initializing the config before constructing.
+
+#### Public Methods
+* **`produce(topic : String, payload : Bytes | String, key : Bytes | String? = nil, headers : Hash(String, String) = {}, partition : Int32 = 0, timestamp : Time? = nil)`**: Asynchronously queues a record into the batch accumulator. Automatically handles retries and backoffs if configured.
+* **`flush(timeout_ms : Int32 = 5000)`**: Forces the batch accumulator to immediately serialize and write all queued records to the broker network socket.
+* **`begin_transaction`**: Starts a transactional scope (requires `transactional.id` to be defined in configurations).
+* **`commit_transaction`**: Atomically commits all produced records written inside the active transaction scope.
+* **`abort_transaction`**: Aborts and discards all records written inside the active transaction scope.
+* **`send_offsets_to_transaction(offsets : Hash(String, Int64), group_id : String)`**: Commits consumer group offsets inside the transaction context (enables exactly-once transactional consumer-producer flows).
+* **`on_deliver(&block : String, Int32, Int64, Exception? -> Void)`**: Registers a callback block executed whenever a message is successfully delivered or fails. Block parameters are: `topic`, `partition`, `offset`, `exception`.
+* **`on_stats(&block : String -> Void)`**: Registers a callback block reporting periodic diagnostic and state metadata.
+* **`close`**: Flushes remaining batches and closes TCP socket connections.
+
+---
+
+### `Kafkaesque::Consumer`
+
+Evented streaming client supporting server-side KIP-848 partition coordination.
+
+#### Constructor
+* **`Consumer.new(config : Config)`**: Initializes a new consumer.
+* **`Consumer.new(&block : Config ->)`**: Block builder syntax initializing the config before constructing.
+
+#### Public Methods
+* **`subscribe(topics : Array(String))`** / **`subscribe(*topics : String)`**: Subscribes the consumer to one or more topics.
+* **`each(&block : Protocol::Record ->)`**: Starts the partition fetch loops on background fibers, initiates membership heartbeat loop, and blocks the current fiber streaming received records sequentially to the block.
+* **`on_partitions_assigned(&block : Array(Int32) -> Void)`**: Callback triggered when the broker coordinator assigns partition ownership to the consumer member.
+* **`on_partitions_revoked(&block : Array(Int32) -> Void)`**: Callback triggered when ownership of assigned partitions is revoked.
+* **`close`**: Leaves the consumer group cleanly, closes prefetch channels, and terminates connection sockets.
+
+---
+
 ## Supported Kafka Protocol Versions & Features
 
 Kafkaesque implements a native Crystal serialization engine that directly communicates with Kafka brokers. The table below lists the API keys, protocol versions used under-the-hood, and associated features:
