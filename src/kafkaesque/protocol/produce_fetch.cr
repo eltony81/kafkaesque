@@ -3,6 +3,8 @@ require "./crc32c"
 
 module Kafkaesque
   module Protocol
+    BUFFER_POOL = ObjectPool(IO::Memory).new { IO::Memory.new(4096) }
+
     alias BytesOrString = Bytes | String
 
     struct RecordHeader
@@ -52,46 +54,51 @@ module Kafkaesque
       end
 
       def serialize(io : IO, first_timestamp_ms : Int64 = Time.utc.to_unix_ms, offset_delta : Int32 = 0)
-        buffer = IO::Memory.new
-        encoder = Encoder.new(buffer)
+        buffer = Protocol::BUFFER_POOL.rent
+        buffer.clear
+        begin
+          encoder = Encoder.new(buffer)
 
-        encoder.write_int8(0_i8) # attributes
+          encoder.write_int8(0_i8) # attributes
 
-        t_delta = 0_i64
-        if ts = @timestamp
-          t_delta = ts.to_unix_ms - first_timestamp_ms
+          t_delta = 0_i64
+          if ts = @timestamp
+            t_delta = ts.to_unix_ms - first_timestamp_ms
+          end
+          encoder.write_varlong(t_delta)     # timestamp delta
+          encoder.write_varint(offset_delta) # offset delta
+
+          if (k_bytes = @key).nil?
+            encoder.write_varint(-1)
+          else
+            encoder.write_varint(k_bytes.size)
+            buffer.write(k_bytes)
+          end
+
+          if (v_bytes = @value).nil?
+            encoder.write_varint(-1)
+          else
+            encoder.write_varint(v_bytes.size)
+            buffer.write(v_bytes)
+          end
+
+          encoder.write_varint(@headers.size)
+          @headers.each do |hdr|
+            k_bytes = hdr.key.to_slice
+            encoder.write_varint(k_bytes.size)
+            buffer.write(k_bytes)
+
+            v_bytes = hdr.value_bytes
+            encoder.write_varint(v_bytes.size)
+            buffer.write(v_bytes)
+          end
+
+          main_encoder = Encoder.new(io)
+          main_encoder.write_varint(buffer.size.to_i32)
+          io.write(buffer.to_slice)
+        ensure
+          Protocol::BUFFER_POOL.return(buffer)
         end
-        encoder.write_varlong(t_delta)     # timestamp delta
-        encoder.write_varint(offset_delta) # offset delta
-
-        if (k_bytes = @key).nil?
-          encoder.write_varint(-1)
-        else
-          encoder.write_varint(k_bytes.size)
-          buffer.write(k_bytes)
-        end
-
-        if (v_bytes = @value).nil?
-          encoder.write_varint(-1)
-        else
-          encoder.write_varint(v_bytes.size)
-          buffer.write(v_bytes)
-        end
-
-        encoder.write_varint(@headers.size)
-        @headers.each do |hdr|
-          k_bytes = hdr.key.to_slice
-          encoder.write_varint(k_bytes.size)
-          buffer.write(k_bytes)
-
-          v_bytes = hdr.value_bytes
-          encoder.write_varint(v_bytes.size)
-          buffer.write(v_bytes)
-        end
-
-        main_encoder = Encoder.new(io)
-        main_encoder.write_varint(buffer.size.to_i32)
-        io.write(buffer.to_slice)
       end
     end
 
@@ -138,12 +145,17 @@ module Kafkaesque
         encoder.write_int32(@records.size) # record count
 
         if @compression > 0_i16
-          records_io = IO::Memory.new
-          @records.each_with_index do |record, idx|
-            record.serialize(records_io, first_timestamp_ms, idx.to_i32)
+          records_io = Protocol::BUFFER_POOL.rent
+          records_io.clear
+          begin
+            @records.each_with_index do |record, idx|
+              record.serialize(records_io, first_timestamp_ms, idx.to_i32)
+            end
+            compressed_bytes = Compression.compress(records_io.to_slice, @compression)
+            io.write(compressed_bytes)
+          ensure
+            Protocol::BUFFER_POOL.return(records_io)
           end
-          compressed_bytes = Compression.compress(records_io.to_slice, @compression)
-          io.write(compressed_bytes)
         else
           @records.each_with_index do |record, idx|
             record.serialize(io, first_timestamp_ms, idx.to_i32)

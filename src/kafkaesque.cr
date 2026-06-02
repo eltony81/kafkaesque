@@ -1,3 +1,4 @@
+require "./kafkaesque/object_pool"
 require "./kafkaesque/protocol/types"
 require "./kafkaesque/protocol/request"
 require "./kafkaesque/protocol/response"
