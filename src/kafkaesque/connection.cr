@@ -7,9 +7,11 @@ module Kafkaesque
     getter port : Int32
     getter use_ssl : Bool
     @socket : TCPSocket | OpenSSL::SSL::Socket::Client
+    @write_mutex : Mutex = Mutex.new
 
     def initialize(@host : String, @port : Int32, @use_ssl : Bool = false, context : OpenSSL::SSL::Context::Client? = nil)
       tcp = TCPSocket.new(@host, @port)
+      tcp.tcp_nodelay = true
       if @use_ssl
         ctx = context || OpenSSL::SSL::Context::Client.new
         @socket = OpenSSL::SSL::Socket::Client.new(tcp, ctx)
@@ -19,11 +21,13 @@ module Kafkaesque
     end
 
     def send_request(bytes : Bytes)
-      # Writes message size (4-byte Int32) then payload
-      size = bytes.size.to_i32
-      @socket.write_bytes(size, IO::ByteFormat::BigEndian)
-      @socket.write(bytes)
-      @socket.flush
+      @write_mutex.synchronize do
+        # Writes message size (4-byte Int32) then payload
+        size = bytes.size.to_i32
+        @socket.write_bytes(size, IO::ByteFormat::BigEndian)
+        @socket.write(bytes)
+        @socket.flush
+      end
     end
 
     def read_response : IO::Memory

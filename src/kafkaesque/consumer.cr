@@ -105,6 +105,9 @@ module Kafkaesque
     @partition_offsets = Hash(Int32, Int64).new
     @offset_mutex = Mutex.new
 
+    @prefetch_channel : Channel(Protocol::Record)
+    @active_fetchers : Hash(Int32, Bool)
+
     def self.new(&block : Config ->)
       cfg = Config.build(&block)
       new(cfg)
@@ -113,6 +116,8 @@ module Kafkaesque
     def initialize(@config : Config)
       @partition_offsets = Hash(Int32, Int64).new
       @offset_mutex = Mutex.new
+      @prefetch_channel = Channel(Protocol::Record).new(1000)
+      @active_fetchers = Hash(Int32, Bool).new
     end
 
     def on_partitions_assigned(&block : Array(Int32) -> Void)
@@ -219,6 +224,13 @@ module Kafkaesque
         Log.debug { "Metadata prefetch warning: #{ex.message}" }
       end
 
+      # Spawn background fetchers for assigned partitions
+      @hb_mutex.synchronize { @assigned_partitions.dup }.each do |part|
+        offset = @offset_mutex.synchronize { @partition_offsets[part]? } || default_initial_offset
+        @active_fetchers[part] = true
+        spawn_fetcher(topic_name, part, offset, coord_client)
+      end
+
       auto_commit = @config.settings["enable.auto.commit"]? != "false"
       auto_commit_interval = (@config.settings["auto.commit.interval.ms"]? || "5000").to_i
 
@@ -252,59 +264,18 @@ module Kafkaesque
         end
       end
 
-      while @running
-        parts = @hb_mutex.synchronize { @assigned_partitions.dup }
-
-        if parts.empty?
-          sleep 200.milliseconds
-          next
-        end
-
-        begin
-          topic = @topics.first?
-          break if topic.nil?
-
-          # Fetch from all assigned partitions, not just the first
-          parts.each do |part|
-            next unless @running
-            part_offset = @offset_mutex.synchronize { @partition_offsets[part]? } || default_initial_offset
-
-            poll_resp = coord_client.fetch(topic, partition: part, fetch_offset: part_offset, min_bytes: fetch_min_bytes)
-            if poll_resp.error_code == 0
-              poll_resp.records.each do |record|
-                break unless @running
-                block.call(record)
-                @offset_mutex.synchronize do
-                  @partition_offsets[part] = record.offset + 1
-                end
-              end
-            elsif poll_resp.error_code == 1
-              # OFFSET_OUT_OF_RANGE — reset to actual earliest available offset
-              Log.debug { "OFFSET_OUT_OF_RANGE on partition #{part} at offset #{part_offset}, querying earliest..." }
-              begin
-                list_resp = coord_client.list_offsets(topic, part, Client::TIMESTAMP_EARLIEST)
-                if list_resp.error_code == 0 && list_resp.offset >= 0
-                  Log.debug { "Resetting partition #{part} offset to #{list_resp.offset}" }
-                  @offset_mutex.synchronize do
-                    @partition_offsets[part] = list_resp.offset
-                  end
-                end
-              rescue ex
-                Log.error(exception: ex) { "list_offsets error on partition #{part}" }
-              end
-            else
-              Log.debug { "Fetch error on partition #{part}: code=#{poll_resp.error_code}" }
-            end
+      begin
+        while @running
+          select
+          when record = @prefetch_channel.receive
+            block.call(record)
+          when timeout(200.milliseconds)
+            Fiber.yield
           end
-        rescue ex
-          Log.error(exception: ex) { "Consumer loop error" }
-          sleep 1.second
         end
-
-        sleep 100.milliseconds
+      ensure
+        close_internal
       end
-    ensure
-      close_internal
     end
 
     private def resolve_coordinator(group_id : String) : Client
@@ -413,6 +384,16 @@ module Kafkaesque
             end
           end
 
+          # Spawn fetchers for new partitions:
+          if @running && !@prefetch_channel.closed? && (coord = @coordinator_client)
+            topic_name = @topics.first? || ""
+            (new_partitions - @assigned_partitions).each do |part|
+              offset = @offset_mutex.synchronize { @partition_offsets[part]? } || default_initial_offset
+              @active_fetchers[part] = true
+              spawn_fetcher(topic_name, part, offset, coord)
+            end
+          end
+
           @topic_uuid = new_topic_uuid
           @assigned_partitions = new_partitions
           Log.debug { "Partition assignment applied: #{new_partitions}" }
@@ -423,8 +404,54 @@ module Kafkaesque
       end
     end
 
+    private def spawn_fetcher(topic : String, partition : Int32, start_offset : Int64, client : Client)
+      @offset_mutex.synchronize { @partition_offsets[partition] = start_offset }
+
+      spawn do
+        current_offset = start_offset
+        fetch_min_bytes = (@config.settings["fetch.min.bytes"]? || "1").to_i
+
+        while @running && @active_fetchers[partition]?
+          begin
+            poll_resp = client.fetch(topic, partition: partition, fetch_offset: current_offset, min_bytes: fetch_min_bytes)
+            if poll_resp.error_code == 0
+              if poll_resp.records.empty?
+                sleep 50.milliseconds
+              else
+                poll_resp.records.each do |record|
+                  break unless @running && @active_fetchers[partition]?
+                  @prefetch_channel.send(record)
+                  current_offset = record.offset + 1
+                  @offset_mutex.synchronize { @partition_offsets[partition] = current_offset }
+                end
+              end
+            elsif poll_resp.error_code == 1
+              Log.debug { "OFFSET_OUT_OF_RANGE on partition #{partition} at offset #{current_offset}, querying earliest..." }
+              list_resp = client.list_offsets(topic, partition, Client::TIMESTAMP_EARLIEST)
+              if list_resp.error_code == 0 && list_resp.offset >= 0
+                current_offset = list_resp.offset
+                @offset_mutex.synchronize { @partition_offsets[partition] = current_offset }
+              else
+                sleep 100.milliseconds
+              end
+            else
+              sleep 100.milliseconds
+            end
+          rescue ex
+            # Network or transport failure, backoff
+            sleep 500.milliseconds
+          end
+        end
+        @active_fetchers.delete(partition)
+      end
+    end
+
     def close
       @running = false
+      @active_fetchers.each_key do |part|
+        @active_fetchers[part] = false
+      end
+      @prefetch_channel.close rescue nil
       close_internal
     end
 
