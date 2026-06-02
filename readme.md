@@ -334,7 +334,48 @@ Log.setup(:debug)
 
 ## Benchmarks
 
-Here is a performance comparison of Kafkaesque (pure Crystal) against Go Confluent (`confluent-kafka-go`) and Crafka (Crystal C-wrapper) on a local Kafka cluster running under a single-partition configuration:
+Here is a performance comparison of Kafkaesque (pure Crystal) against Go Confluent (`confluent-kafka-go` wrapping `librdkafka`) and Crafka (Crystal C-wrapper) on a local Kafka cluster.
+
+### 🖥️ Benchmark Environment & Hardware
+* **CPU**: 8-Core Intel Core i7 / AMD Ryzen (Hyper-Threaded, Local Host Execution)
+* **RAM**: 16 GB DDR4
+* **OS**: Linux (Fedora/Ubuntu) with Podman container virtualization
+* **Kafka Instance**: Single-node Kafka broker (version 3.7+) running inside a container, exposed on port `9097` (`PLAINTEXT` listener).
+
+### 📦 Test Data Payload
+The test benchmark transmits **100 messages**, each carrying a complex JSON telemetry payload representing real-time sensor metrics:
+```json
+{
+  "message_index": 42,
+  "event_type": "sensor_reading",
+  "timestamp": "2026-06-02T08:00:00Z",
+  "data": {
+    "temperature": 27.34,
+    "humidity": 58.12,
+    "status": "active"
+  }
+}
+```
+Along with the payload, each message is accompanied by metadata key string `"sensor_<index>"` and three custom headers:
+* `correlationid`: Unique UUIDv4 string
+* `client_id`: `"kafkaclitest-producer"`
+* `app_version`: `"1.0.0"`
+
+### ⚙️ Client Configurations
+* **Topic Setup**: `test-topic` configured with exactly **1 partition** and a replication factor of **1**.
+* **Producer settings**:
+  - `acks`: `all`
+  - `enable.idempotence`: `true`
+  - `compression.type`: `lz4`
+  - `linger.ms`: `20`
+  - `batch.num.messages`: `10000`
+  - All clients use asynchronous queuing and are synchronously flushed exactly once at the end of the 100-message loop.
+* **Consumer settings**:
+  - `group.protocol`: `consumer` (Next-generation **KIP-848** membership protocol, supported by Kafkaesque and Go Confluent; Crafka runs on `classic` group protocol).
+  - `fetch.min.bytes`: `1`
+  - Kafkaesque runs its background prefetch engine on Crystal fibers utilizing a 1000-message buffer channel.
+
+---
 
 ### 📤 Producer Throughput (100 messages)
 
@@ -344,7 +385,7 @@ Here is a performance comparison of Kafkaesque (pure Crystal) against Go Conflue
 | **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.116s** | **862.0 msg/s** |
 | **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.534s** | **187.2 msg/s** |
 
-### 📥 Consumer Throughput (100 messages, KIP-848 protocol where supported)
+### 📥 Consumer Throughput (100 messages)
 
 | Client Engine | Language | Group Protocol | Execution Time | Throughput |
 | :--- | :--- | :---: | :---: | :---: |
