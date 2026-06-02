@@ -1,0 +1,30 @@
+name: Crystal CI
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Crystal
+      uses: crystal-lang/install-crystal@v1
+      with:
+        crystal: 1.20.2
+
+    - name: Install Shards
+      run: shards install
+
+    - name: Run Linter / Format Check
+      run: crystal tool format --check
+
+    - name: Run Specs
+      run: crystal spec
