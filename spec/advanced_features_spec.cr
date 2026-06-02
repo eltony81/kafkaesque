@@ -153,4 +153,71 @@ describe "Kafkaesque Advanced Features" do
       broker.close
     end
   end
+
+  it "respects configurable max_retries limit" do
+    broker = Kafkaesque::MockBroker.new
+    produce_calls = 0
+
+    # Mock Metadata Request (API KEY 3)
+    broker.on_request(3_i16) do |decoder, version|
+      decoder.read_array { decoder.read_string }
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+      enc.write_array([nil]) do
+        enc.write_int32(1)
+        enc.write_string("127.0.0.1")
+        enc.write_int32(broker.port)
+        enc.write_string(nil)
+      end
+      enc.write_string("mock-cluster")
+      enc.write_int32(1)
+      enc.write_array(["sensor-temp"]) do |name|
+        enc.write_int16(0_i16)
+        enc.write_string(name)
+        enc.write_int8(0_i8)
+        enc.write_array([nil]) do
+          enc.write_int16(0_i16)
+          enc.write_int32(0)
+          enc.write_int32(1)
+          enc.write_array([] of Int32) { }
+          enc.write_array([] of Int32) { }
+        end
+      end
+      io
+    end
+
+    # Mock Produce Request (API KEY 0)
+    broker.on_request(0_i16) do |decoder, version|
+      produce_calls += 1
+      decoder.read_int16 # acks
+      decoder.read_int32 # timeout
+      
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+      enc.write_array(["sensor-temp"]) do |topic|
+        enc.write_string(topic)
+        enc.write_array([0]) do |part|
+          enc.write_int32(part)
+          enc.write_int16(5_i16) # LEADER_NOT_AVAILABLE (keeps failing)
+          enc.write_int64(100_i64)
+          enc.write_int64(-1_i64)
+          enc.write_int64(0_i64)
+        end
+      end
+      enc.write_int32(0)
+      io
+    end
+
+    begin
+      client = Kafkaesque::Client.new("127.0.0.1", broker.port, max_retries: 2)
+      client.connect
+
+      # We expect it to try 2 times (initial + 1 retry) and then return the failed response
+      resp = client.produce("sensor-temp", "key", "val", partition: 0)
+      produce_calls.should eq(2)
+      resp.error_code.should eq(5)
+    ensure
+      broker.close
+    end
+  end
 end

@@ -24,7 +24,7 @@ module Kafkaesque
         base_sequence: base_seq
       )
 
-      retries = 3
+      retries = @max_retries
       while retries > 0
         begin
           conn = connection_for_partition(topic, partition)
@@ -135,7 +135,7 @@ module Kafkaesque
           compression: @compression
         )
 
-        retries = 3
+        retries = @max_retries
         resp = nil
         while retries > 0
           begin
@@ -268,7 +268,7 @@ module Kafkaesque
     def fetch(topic : String, partition : Int32 = 0, fetch_offset : Int64 = 0_i64, min_bytes : Int32 = 1) : Protocol::FetchResponse
       req = Protocol::FetchRequest.new(topic, partition, fetch_offset, min_bytes)
 
-      retries = 3
+      retries = @max_retries
       while retries > 0
         begin
           conn = connection_for_partition(topic, partition)

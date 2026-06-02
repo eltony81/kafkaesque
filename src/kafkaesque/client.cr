@@ -11,6 +11,7 @@ module Kafkaesque
     property heartbeat_interval_ms : Int32 = 3000
     property max_poll_interval_ms : Int32 = 300000
     property userid : String? = nil
+    property max_retries : Int32 = 3
     property on_deliver : (String, Int32, Int64, Exception? -> Void)? = nil
 
     # Idempotent producer state
@@ -51,6 +52,7 @@ module Kafkaesque
       @client_id = "kafkaesque-crystal",
       @ssl_context : OpenSSL::SSL::Context::Client? = nil,
       @oauth_token_provider : (-> String)? = nil,
+      @max_retries : Int32 = 3,
     )
     end
 
@@ -263,6 +265,7 @@ module Kafkaesque
       oauth_token_provider : (-> String)? = nil,
       use_ssl : Bool = false,
       ssl_context : OpenSSL::SSL::Context::Client? = nil,
+      max_retries : Int32 = 3,
     ) : Client
       last_err = nil
       servers.each do |server|
@@ -277,7 +280,8 @@ module Kafkaesque
             sasl_token: sasl_token,
             client_id: client_id,
             ssl_context: ssl_context,
-            oauth_token_provider: oauth_token_provider
+            oauth_token_provider: oauth_token_provider,
+            max_retries: max_retries
           )
           client.connect
           return client
