@@ -1,0 +1,22 @@
+# Kafkaesque Example Configuration File
+
+bootstrap_servers:
+  - "localhost:9092"
+
+group_id: "telemetry-group"
+initial_offset_smallest: "true"
+compression_type: "lz4"
+
+settings:
+  # Producer Settings
+  enable.idempotence: "true"
+  acks: "all"
+  linger.ms: "100"
+  batch.num.messages: "10000"
+  retries: "5"
+  retry.backoff.ms: "100"
+
+  # Consumer Settings
+  session.timeout.ms: "30000"
+  heartbeat.interval.ms: "10000"
+  fetch.min.bytes: "1"
