@@ -373,7 +373,8 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 * **Consumer settings**:
   - `group.protocol`: `consumer` (Next-generation **KIP-848** membership protocol, supported by Kafkaesque and Go Confluent; Crafka runs on `classic` group protocol).
   - `fetch.min.bytes`: `1`
-  - Kafkaesque runs its background prefetch engine on Crystal fibers utilizing a 1000-message buffer channel.
+  - Kafkaesque runs its background prefetching engine on Crystal fibers utilizing a 1000-message buffer channel.
+  - Go Confluent/Crafka rely on `librdkafka`'s internal C-thread prefetch queues (configured via `queued.min.messages`, defaulting to 100,000 messages).
 
 ---
 
