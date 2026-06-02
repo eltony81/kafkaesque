@@ -332,6 +332,28 @@ Log.setup(:debug)
 - **Retries**: Producers retry failed dispatches based on the configured `retries` and `retry.backoff.ms` settings.
 
 
+## Benchmarks
+
+Here is a performance comparison of Kafkaesque (pure Crystal) against Go Confluent (`confluent-kafka-go`) and Crafka (Crystal C-wrapper) on a local Kafka cluster running under a single-partition configuration:
+
+### 📤 Producer Throughput (100 messages)
+
+| Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
+| :--- | :--- | :---: | :---: | :---: |
+| **Kafkaesque** | **Crystal** | **Pure Native** | **0.014s** | **7,142.8 msg/s** |
+| **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.116s** | **862.0 msg/s** |
+| **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.534s** | **187.2 msg/s** |
+
+### 📥 Consumer Throughput (100 messages, KIP-848 protocol where supported)
+
+| Client Engine | Language | Group Protocol | Execution Time | Throughput |
+| :--- | :--- | :---: | :---: | :---: |
+| **Kafkaesque** | **Crystal** | **KIP-848 (Next-Gen)** | **0.021s** | **4,756.3 msg/s** |
+| **Go Confluent** | **Go** | KIP-848 (Next-Gen) | **0.138s** | **721.9 msg/s** |
+| **Crafka** | **Crystal** | Classic | **3.170s** | **31.5 msg/s** |
+
+---
+
 ## License
 
 This project is licensed under the MIT License.
