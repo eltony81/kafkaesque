@@ -262,6 +262,81 @@ ensure
 end
 ```
 
+### 4. Regex Consumer Subscription
+
+You can subscribe to topics dynamically matching a Regular Expression. A background discovery loop automatically identifies newly created topics in the cluster that match the pattern and subscribes the consumer to them.
+
+```crystal
+require "kafkaesque"
+
+config = Kafkaesque::ConfigLoader.load_consumer_config("config.yml")
+consumer = Kafkaesque::Consumer.new(config)
+
+# Subscribe to any topic starting with "sensor-"
+consumer.subscribe(/^sensor-.*$/)
+
+begin
+  consumer.each do |message|
+    puts "Topic: #{message.topic} | Value: #{message.value}"
+  end
+ensure
+  consumer.close
+end
+```
+
+### 5. Unit Testing with Mock Broker
+
+Kafkaesque provides a built-in `MockBroker` to verify your application's consumer or producer logic locally without needing a live Kafka container.
+
+```crystal
+require "spec"
+require "kafkaesque"
+require "kafkaesque/mock_broker"
+
+describe "My Kafka Application" do
+  it "successfully publishes message to mock broker" do
+    # Start mock broker on random local port
+    broker = Kafkaesque::MockBroker.new
+
+    # Mock response for Produce requests (API KEY 0)
+    broker.on_request(0_i16) do |decoder, version|
+      # Parse or skip request details as desired
+      # and return a serialized ProduceResponse body
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+
+      # Array of topics (size 1)
+      enc.write_array(["my-topic"]) do |topic|
+        enc.write_string(topic)
+        # Array of partitions (size 1)
+        enc.write_array([0]) do |part|
+          enc.write_int32(part)    # Partition index
+          enc.write_int16(0_i16)   # Success error code
+          enc.write_int64(42_i64)  # Committed base offset
+          enc.write_int64(-1_i64)  # Log append time
+          enc.write_int64(0_i64)   # Log start offset
+        end
+      end
+      enc.write_int32(0) # throttle_time_ms
+      io
+    end
+
+    begin
+      # Direct client to connect to local mock broker
+      client = Kafkaesque::Client.new("127.0.0.1", broker.port)
+      client.connect
+
+      # Produce message
+      resp = client.produce("my-topic", "key", "val")
+      resp.error_code.should eq(0)
+      resp.base_offset.should eq(42)
+    ensure
+      broker.close
+    end
+  end
+end
+```
+
 ---
 
 ## API Reference
