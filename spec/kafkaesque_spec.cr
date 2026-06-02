@@ -17,7 +17,7 @@ describe Kafkaesque::Protocol do
   it "encodes and decodes fixed-width integers" do
     io = IO::Memory.new
     encoder = Kafkaesque::Protocol::Encoder.new(io)
-    
+
     encoder.write_int8(12_i8)
     encoder.write_int16(-345_i16)
     encoder.write_int32(123456_i32)
@@ -151,24 +151,24 @@ describe Kafkaesque::Protocol do
 
     # 1 broker
     enc2.write_int32(1)
-    enc2.write_int32(1) # node_id
+    enc2.write_int32(1)            # node_id
     enc2.write_string("localhost") # host
-    enc2.write_int32(9092) # port
-    enc2.write_string(nil) # rack
+    enc2.write_int32(9092)         # port
+    enc2.write_string(nil)         # rack
 
     enc2.write_string("cluster1") # cluster_id
-    enc2.write_int32(1) # controller_id
+    enc2.write_int32(1)           # controller_id
 
     # 1 topic
     enc2.write_int32(1)
-    enc2.write_int16(0) # error_code
+    enc2.write_int16(0)         # error_code
     enc2.write_string("topic1") # name
-    enc2.write_boolean(false) # is_internal
+    enc2.write_boolean(false)   # is_internal
     # 1 partition
     enc2.write_int32(1)
-    enc2.write_int16(0) # error_code
-    enc2.write_int32(0) # partition_index
-    enc2.write_int32(1) # leader
+    enc2.write_int16(0)                                 # error_code
+    enc2.write_int32(0)                                 # partition_index
+    enc2.write_int32(1)                                 # leader
     enc2.write_array([1]) { |id| enc2.write_int32(id) } # replicas
     enc2.write_array([1]) { |id| enc2.write_int32(id) } # isr
 
@@ -213,8 +213,8 @@ describe Kafkaesque::Protocol do
     # Authenticate Response
     io3 = IO::Memory.new
     enc3 = Kafkaesque::Protocol::Encoder.new(io3)
-    enc3.write_int16(0) # error_code
-    enc3.write_string("Success") # error_message
+    enc3.write_int16(0)           # error_code
+    enc3.write_string("Success")  # error_message
     enc3.write_bytes(Bytes.empty) # auth_bytes
 
     io3.rewind
@@ -235,7 +235,7 @@ describe Kafkaesque::Protocol do
 
   it "computes CRC32C and serializes/deserializes RecordBatch" do
     records = [
-      Kafkaesque::Protocol::Record.new("test-key", "test-val")
+      Kafkaesque::Protocol::Record.new("test-key", "test-val"),
     ]
     batch = Kafkaesque::Protocol::RecordBatch.new(records)
 
@@ -262,12 +262,12 @@ describe Kafkaesque::Protocol do
 
     resp_io = IO::Memory.new
     resp_enc = Kafkaesque::Protocol::Encoder.new(resp_io)
-    resp_enc.write_int32(100) # throttle_time_ms
-    resp_enc.write_int16(0_i16) # error_code
-    resp_enc.write_string("no error") # message
-    resp_enc.write_int32(1) # coordinator node_id
+    resp_enc.write_int32(100)                 # throttle_time_ms
+    resp_enc.write_int16(0_i16)               # error_code
+    resp_enc.write_string("no error")         # message
+    resp_enc.write_int32(1)                   # coordinator node_id
     resp_enc.write_string("coordinator-host") # host
-    resp_enc.write_int32(9092) # port
+    resp_enc.write_int32(9092)                # port
 
     resp_io.rewind
     resp_dec = Kafkaesque::Protocol::Decoder.new(resp_io)
@@ -299,12 +299,12 @@ describe Kafkaesque::Protocol do
     # v0 response: no throttle_time_ms field
     resp_io = IO::Memory.new
     resp_enc = Kafkaesque::Protocol::Encoder.new(resp_io)
-    resp_enc.write_int16(0_i16)       # error_code
-    resp_enc.write_int32(12)          # generation_id
-    resp_enc.write_string("range")    # protocol_name
-    resp_enc.write_string("leader-1") # leader_id
-    resp_enc.write_string("member-1") # member_id
-    resp_enc.write_array([] of String) {} # members list
+    resp_enc.write_int16(0_i16)            # error_code
+    resp_enc.write_int32(12)               # generation_id
+    resp_enc.write_string("range")         # protocol_name
+    resp_enc.write_string("leader-1")      # leader_id
+    resp_enc.write_string("member-1")      # member_id
+    resp_enc.write_array([] of String) { } # members list
 
     resp_io.rewind
     resp_dec = Kafkaesque::Protocol::Decoder.new(resp_io)
@@ -332,8 +332,8 @@ describe Kafkaesque::Protocol do
 
     resp_io = IO::Memory.new
     resp_enc = Kafkaesque::Protocol::Encoder.new(resp_io)
-    resp_enc.write_int32(100) # throttle_time
-    resp_enc.write_int16(0_i16) # error
+    resp_enc.write_int32(100)            # throttle_time
+    resp_enc.write_int16(0_i16)          # error
     resp_enc.write_bytes(Bytes[1, 2, 3]) # assignment
 
     resp_io.rewind
@@ -358,7 +358,7 @@ describe Kafkaesque::Protocol do
 
     resp_io = IO::Memory.new
     resp_enc = Kafkaesque::Protocol::Encoder.new(resp_io)
-    resp_enc.write_int32(100) # throttle_time
+    resp_enc.write_int32(100)   # throttle_time
     resp_enc.write_int16(0_i16) # error
 
     resp_io.rewind
@@ -376,16 +376,16 @@ describe Kafkaesque::Protocol do
 
     io.rewind
     dec = Kafkaesque::Protocol::Decoder.new(io)
-    dec.read_string.should be_nil          # transactional_id = null
-    dec.read_int32.should eq(30000)        # transaction_timeout_ms
+    dec.read_string.should be_nil   # transactional_id = null
+    dec.read_int32.should eq(30000) # transaction_timeout_ms
 
     # Deserialize response
     resp_io = IO::Memory.new
     resp_enc = Kafkaesque::Protocol::Encoder.new(resp_io)
-    resp_enc.write_int32(0)            # throttle_time_ms
-    resp_enc.write_int16(0_i16)        # error_code
-    resp_enc.write_int64(12345_i64)    # producer_id
-    resp_enc.write_int16(0_i16)        # producer_epoch
+    resp_enc.write_int32(0)         # throttle_time_ms
+    resp_enc.write_int16(0_i16)     # error_code
+    resp_enc.write_int64(12345_i64) # producer_id
+    resp_enc.write_int16(0_i16)     # producer_epoch
 
     resp_io.rewind
     resp_dec = Kafkaesque::Protocol::Decoder.new(resp_io)
@@ -464,8 +464,8 @@ describe Kafkaesque::Protocol do
     batch_len = dec.read_int32
     batch_len.should be > 0
 
-    dec.read_int32 # partition_leader_epoch
-    dec.read_int8  # magic byte
+    dec.read_int32  # partition_leader_epoch
+    dec.read_int8   # magic byte
     dec.read_uint32 # crc
 
     dec.read_int16 # attributes
@@ -473,9 +473,9 @@ describe Kafkaesque::Protocol do
     dec.read_int64 # first_timestamp
     dec.read_int64 # max_timestamp
 
-    dec.read_int64.should eq(9876_i64)  # producer_id
-    dec.read_int16.should eq(3_i16)     # producer_epoch
-    dec.read_int32.should eq(42)        # base_sequence
+    dec.read_int64.should eq(9876_i64) # producer_id
+    dec.read_int16.should eq(3_i16)    # producer_epoch
+    dec.read_int32.should eq(42)       # base_sequence
 
     dec.read_int32.should eq(2) # record count
   end
@@ -498,9 +498,9 @@ describe Kafkaesque::Protocol do
 
     io.rewind
     dec = Kafkaesque::Protocol::Decoder.new(io)
-    dec.read_string.should be_nil   # transactional_id
+    dec.read_string.should be_nil    # transactional_id
     dec.read_int16.should eq(-1_i16) # acks
-    dec.read_int32.should eq(3000)  # timeout_ms
+    dec.read_int32.should eq(3000)   # timeout_ms
 
     topic_count = dec.read_int32
     topic_count.should eq(1)
@@ -514,15 +514,15 @@ describe Kafkaesque::Protocol do
     batch_bytes = dec.read_bytes.not_nil!
     batch_io = IO::Memory.new(batch_bytes)
     bdec = Kafkaesque::Protocol::Decoder.new(batch_io)
-    bdec.read_int64 # base_offset
-    bdec.read_int32 # batch_length
-    bdec.read_int32 # partition_leader_epoch
-    bdec.read_int8  # magic
-    bdec.read_uint32 # crc
-    bdec.read_int16 # attributes
-    bdec.read_int32 # last_offset_delta
-    bdec.read_int64 # first_timestamp
-    bdec.read_int64 # max_timestamp
+    bdec.read_int64                     # base_offset
+    bdec.read_int32                     # batch_length
+    bdec.read_int32                     # partition_leader_epoch
+    bdec.read_int8                      # magic
+    bdec.read_uint32                    # crc
+    bdec.read_int16                     # attributes
+    bdec.read_int32                     # last_offset_delta
+    bdec.read_int64                     # first_timestamp
+    bdec.read_int64                     # max_timestamp
     bdec.read_int64.should eq(1111_i64) # producer_id
     bdec.read_int16.should eq(2_i16)    # producer_epoch
     bdec.read_int32.should eq(7)        # base_sequence

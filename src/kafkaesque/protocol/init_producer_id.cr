@@ -1,8 +1,8 @@
 module Kafkaesque
   module Protocol
     struct InitProducerIdRequest
-      API_KEY = 22_i16
-      API_VERSION = 0_i16
+      API_KEY     = 22_i16
+      API_VERSION =  0_i16
 
       property transactional_id : String?
       property transaction_timeout_ms : Int32

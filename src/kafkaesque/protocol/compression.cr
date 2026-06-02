@@ -72,7 +72,7 @@ module Kafkaesque
         when 2 # Snappy
           status_len = LibSnappy.uncompressed_length(data, data.size.to_u64, out uncompressed_len)
           raise "Snappy uncompressed length check failed (status: #{status_len})" if status_len != 0
-          
+
           dest = Bytes.new(uncompressed_len)
           decomp_len = uncompressed_len.to_u64
           status = LibSnappy.uncompress(data, data.size.to_u64, dest, pointerof(decomp_len))
@@ -81,31 +81,31 @@ module Kafkaesque
         when 3 # LZ4
           status = LibLZ4.createDecompressionContext(out dctx, 100_u32)
           raise "Failed to create LZ4 decompression context" if LibLZ4.isError(status) != 0
-          
+
           begin
             capacity = 1024 * 1024
             dest = Bytes.new(capacity)
             src_pos = 0_u64
             dest_pos = 0_u64
-            
+
             loop do
               src_size = data.size.to_u64 - src_pos
               dest_size = dest.size.to_u64 - dest_pos
-              
+
               src_ptr = data.to_unsafe + src_pos
               dest_ptr = dest.to_unsafe + dest_pos
-              
+
               res = LibLZ4.decompress(dctx, dest_ptr, pointerof(dest_size), src_ptr, pointerof(src_size), nil)
               raise "LZ4 decompression error" if LibLZ4.isError(res) != 0
-              
+
               src_pos += src_size
               dest_pos += dest_size
-              
+
               break if res == 0
               if src_pos >= data.size
                 raise "LZ4 decompression ended prematurely"
               end
-              
+
               if dest_pos >= dest.size
                 capacity *= 2
                 new_dest = Bytes.new(capacity)

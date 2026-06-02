@@ -97,7 +97,7 @@ module Kafkaesque
         end
       end
 
-      def write_array(array : Array(T)?) forall T
+      def write_array(array : Array(T)?, &) forall T
         if array.nil?
           write_int32(-1)
         else
@@ -108,7 +108,7 @@ module Kafkaesque
         end
       end
 
-      def write_compact_array(array : Array(T)?) forall T
+      def write_compact_array(array : Array(T)?, &) forall T
         if array.nil?
           write_uvarint(0) # null compact array
         else
@@ -222,8 +222,8 @@ module Kafkaesque
       def read_tag_buffer
         count = read_uvarint
         count.times do
-          _tag_id = read_uvarint    # field tag
-          tag_len = read_uvarint    # field byte length
+          _tag_id = read_uvarint # field tag
+          tag_len = read_uvarint # field byte length
           buf = Bytes.new(tag_len)
           @io.read_fully(buf)
         end
@@ -240,7 +240,7 @@ module Kafkaesque
 
       def read_compact_string : String?
         len = read_uvarint
-        return nil if len == 0  # 0 = null in compact encoding
+        return nil if len == 0 # 0 = null in compact encoding
         actual_len = len - 1
         return "" if actual_len == 0
         buf = Bytes.new(actual_len)
@@ -259,7 +259,7 @@ module Kafkaesque
 
       def read_compact_bytes : Bytes?
         len = read_uvarint
-        return nil if len == 0  # 0 = null in compact encoding
+        return nil if len == 0 # 0 = null in compact encoding
         actual_len = len - 1
         return Bytes.empty if actual_len == 0
         buf = Bytes.new(actual_len)
@@ -276,7 +276,7 @@ module Kafkaesque
 
       def read_compact_array(&block : -> T) : Array(T)? forall T
         len = read_uvarint
-        return nil if len == 0  # 0 = null in compact encoding
+        return nil if len == 0 # 0 = null in compact encoding
         actual_len = len - 1
         Array(T).new(actual_len) { block.call }
       end

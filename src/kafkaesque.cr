@@ -20,6 +20,5 @@ require "uri"
 
 module Kafkaesque
   VERSION = "0.1.0"
-  Log = ::Log.for("kafkaesque")
+  Log     = ::Log.for("kafkaesque")
 end
-

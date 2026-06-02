@@ -14,7 +14,7 @@ module Kafkaesque
         group_id : String? = nil,
         @sasl_token : String? = nil,
         @initial_offset_smallest : Bool = false,
-        @settings = {} of String => String
+        @settings = {} of String => String,
       )
         if group_id
           set("group.id", group_id)
@@ -35,7 +35,7 @@ module Kafkaesque
         if endpoint = @settings["sasl.oauthbearer.token.endpoint.url"]?
           client_id = @settings["sasl.oauthbearer.client.id"]? || ""
           client_secret = @settings["sasl.oauthbearer.client.secret"]? || ""
-          
+
           @oauth_token_provider = -> {
             response = HTTP::Client.post(
               endpoint,
@@ -96,7 +96,7 @@ module Kafkaesque
       if @config.bootstrap_servers.empty?
         raise "No bootstrap servers configured"
       end
-      
+
       group_id = @config.settings["group.id"]? || "default-group"
       instance_id = @config.settings["group.instance.id"]?
       session_timeout = (@config.settings["session.timeout.ms"]? || "30000").to_i
@@ -188,13 +188,13 @@ module Kafkaesque
           while @running
             sleep auto_commit_interval.milliseconds
             break unless @running
-            
+
             # Commit current offsets for all assigned partitions
             parts = @hb_mutex.synchronize { @assigned_partitions.dup }
             parts.each do |part|
               offset = @offset_mutex.synchronize { @partition_offsets[part]? }
               next if offset.nil? || offset < 0_i64
-              
+
               begin
                 coord_client.offset_commit(
                   group_id: group_id,
@@ -277,7 +277,7 @@ module Kafkaesque
           client_id: "kafkaesque-consumer-bootstrap",
           oauth_token_provider: @config.oauth_token_provider
         )
-        
+
         coord_resp = bootstrap_client.find_coordinator(group_id)
         bootstrap_client.close
 
@@ -334,16 +334,16 @@ module Kafkaesque
           new_topic_uuid = tp.topic_id
           new_partitions.concat(tp.partitions)
         end
-        
+
         if @assigned_partitions != new_partitions
           if cb_rev = @on_partitions_revoked
             cb_rev.call(@assigned_partitions)
           end
-          
+
           # Initialize offset for new partitions
           is_smallest = @config.initial_offset_smallest || @config.settings["auto.offset.reset"]? == "smallest"
           default_initial_offset = is_smallest ? 0_i64 : -1_i64
-          
+
           @offset_mutex.synchronize do
             # Keep offsets for partitions that are still assigned, initialize new ones
             new_offsets = Hash(Int32, Int64).new
@@ -400,7 +400,7 @@ module Kafkaesque
               owned_tp = [] of Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions
               if !@assigned_partitions.empty? && !@topic_uuid.empty?
                 owned_tp = [
-                  Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions.new(@topic_uuid, @assigned_partitions)
+                  Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions.new(@topic_uuid, @assigned_partitions),
                 ]
               end
 

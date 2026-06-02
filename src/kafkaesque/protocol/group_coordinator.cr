@@ -1,8 +1,8 @@
 module Kafkaesque
   module Protocol
     struct FindCoordinatorRequest
-      API_KEY = 10_i16
-      API_VERSION = 2_i16
+      API_KEY     = 10_i16
+      API_VERSION =  2_i16
 
       property key : String
       property key_type : Int8
@@ -28,7 +28,7 @@ module Kafkaesque
         decoder.read_int32 # throttle_time_ms
         error_code = decoder.read_int16
         decoder.read_string # error message
-        decoder.read_int32 # coordinator node_id
+        decoder.read_int32  # coordinator node_id
         host = decoder.read_string.to_s
         port = decoder.read_int32
         FindCoordinatorResponse.new(error_code, host, port)
@@ -49,8 +49,8 @@ module Kafkaesque
     end
 
     struct JoinGroupRequest
-      API_KEY = 11_i16
-      API_VERSION = 0_i16   # v0: session_timeout only, no rebalance_timeout; broker responds without throttle_time_ms
+      API_KEY     = 11_i16
+      API_VERSION =  0_i16 # v0: session_timeout only, no rebalance_timeout; broker responds without throttle_time_ms
 
       property group_id : String
       property member_id : String
@@ -83,11 +83,11 @@ module Kafkaesque
 
       def self.deserialize(decoder : Decoder) : JoinGroupResponse
         # v0 response: no throttle_time_ms field
-        error_code    = decoder.read_int16
+        error_code = decoder.read_int16
         generation_id = decoder.read_int32
         protocol_name = decoder.read_string
-        leader_id     = decoder.read_string.to_s
-        member_id     = decoder.read_string.to_s
+        leader_id = decoder.read_string.to_s
+        member_id = decoder.read_string.to_s
 
         # members array (only populated when we are the leader)
         decoder.read_array do
@@ -100,8 +100,8 @@ module Kafkaesque
     end
 
     struct SyncGroupRequest
-      API_KEY = 14_i16
-      API_VERSION = 1_i16   # v1: no group_instance_id
+      API_KEY     = 14_i16
+      API_VERSION =  1_i16 # v1: no group_instance_id
 
       property group_id : String
       property generation_id : Int32
@@ -134,8 +134,8 @@ module Kafkaesque
     end
 
     struct HeartbeatRequest
-      API_KEY = 12_i16
-      API_VERSION = 1_i16   # v1: no group_instance_id
+      API_KEY     = 12_i16
+      API_VERSION =  1_i16 # v1: no group_instance_id
 
       property group_id : String
       property generation_id : Int32
@@ -169,15 +169,15 @@ module Kafkaesque
     # group can resume at the right position after a restart or rebalance.
 
     struct OffsetCommitRequest
-      API_KEY = 8_i16
-      API_VERSION = 2_i16   # v2: widely supported, includes retention_time_ms
+      API_KEY     = 8_i16
+      API_VERSION = 2_i16 # v2: widely supported, includes retention_time_ms
 
       property group_id : String
       property generation_id : Int32
       property member_id : String
       property topic : String
       property partition : Int32
-      property offset : Int64     # the *next* offset to be read (committed + 1)
+      property offset : Int64 # the *next* offset to be read (committed + 1)
       property metadata : String?
 
       def initialize(@group_id, @generation_id, @member_id,
@@ -188,13 +188,13 @@ module Kafkaesque
         encoder.write_string(@group_id)
         encoder.write_int32(@generation_id)
         encoder.write_string(@member_id)
-        encoder.write_int64(-1_i64)   # retention_time_ms: -1 = use broker default
+        encoder.write_int64(-1_i64) # retention_time_ms: -1 = use broker default
         encoder.write_array([@topic]) do |t|
           encoder.write_string(t)
           encoder.write_array([@partition]) do |p|
             encoder.write_int32(p)
             encoder.write_int64(@offset)
-            encoder.write_int64(-1_i64)  # timestamp (v2: -1 = wall clock)
+            encoder.write_int64(-1_i64) # timestamp (v2: -1 = wall clock)
             encoder.write_string(@metadata)
           end
         end
@@ -230,8 +230,8 @@ module Kafkaesque
     # Returns -1 when no offset has been committed yet (start from earliest).
 
     struct OffsetFetchRequest
-      API_KEY = 9_i16
-      API_VERSION = 1_i16   # v1: per-partition request, no top-level error_code in response
+      API_KEY     = 9_i16
+      API_VERSION = 1_i16 # v1: per-partition request, no top-level error_code in response
 
       property group_id : String
       property topic : String
@@ -254,7 +254,7 @@ module Kafkaesque
     struct OffsetFetchResponse
       property topic : String
       property partition : Int32
-      property committed_offset : Int64   # -1 means no committed offset yet
+      property committed_offset : Int64 # -1 means no committed offset yet
       property error_code : Int16
 
       def initialize(@topic, @partition, @committed_offset, @error_code)
@@ -271,7 +271,7 @@ module Kafkaesque
           decoder.read_array do
             partition = decoder.read_int32
             committed_offset = decoder.read_int64
-            decoder.read_string  # metadata (may be null)
+            decoder.read_string # metadata (may be null)
             error_code = decoder.read_int16
           end
         end
@@ -285,8 +285,8 @@ module Kafkaesque
     # triggering an immediate rebalance instead of waiting for session timeout.
 
     struct LeaveGroupRequest
-      API_KEY = 13_i16
-      API_VERSION = 1_i16
+      API_KEY     = 13_i16
+      API_VERSION =  1_i16
 
       property group_id : String
       property member_id : String
@@ -315,10 +315,10 @@ module Kafkaesque
 
     # ─── ConsumerGroupHeartbeat (API key 68, version 1) ──────────────────────────
     # Next-Generation consumer group protocol (KIP-848).
-    
+
     struct ConsumerGroupHeartbeatRequest
-      API_KEY = 68_i16
-      API_VERSION = 1_i16
+      API_KEY     = 68_i16
+      API_VERSION =  1_i16
 
       property group_id : String
       property member_id : String
@@ -419,7 +419,7 @@ module Kafkaesque
         member_id = decoder.read_compact_string
         member_epoch = decoder.read_int32
         heartbeat_interval_ms = decoder.read_int32
-        
+
         # Assignment structure (nullable, represented by compact struct deserialization)
         # Note: In Kafka's flexible schema, an optional struct can be represented as null.
         # Wait, the field itself might be a sub-struct. Let's decode it safely.
@@ -428,7 +428,7 @@ module Kafkaesque
         if has_assignment > 0
           assignment = Assignment.deserialize(decoder)
         end
-        
+
         decoder.read_tag_buffer
         ConsumerGroupHeartbeatResponse.new(
           throttle_time_ms, error_code, error_message, member_id, member_epoch, heartbeat_interval_ms, assignment

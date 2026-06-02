@@ -16,7 +16,7 @@ module Kafkaesque
     # Idempotent producer state
     getter producer_id : Int64 = -1_i64
     getter producer_epoch : Int16 = -1_i16
-    @sequence_numbers : Hash(String, Int32) = {} of String => Int32  # "topic:partition" => next_seq
+    @sequence_numbers : Hash(String, Int32) = {} of String => Int32 # "topic:partition" => next_seq
 
     property batch_linger_ms : Int32 = 5
     property batch_max_size : Int32 = 100
@@ -50,7 +50,7 @@ module Kafkaesque
       @sasl_token : String? = nil,
       @client_id = "kafkaesque-crystal",
       @ssl_context : OpenSSL::SSL::Context::Client? = nil,
-      @oauth_token_provider : (-> String)? = nil
+      @oauth_token_provider : (-> String)? = nil,
     )
     end
 
@@ -67,28 +67,28 @@ module Kafkaesque
     private def authenticate_sasl(conn : Connection, token : String)
       # 1. SASL Handshake
       handshake_req = Protocol::SaslHandshakeRequest.new("OAUTHBEARER")
-      
+
       handshake_io = IO::Memory.new
       handshake_enc = Protocol::Encoder.new(handshake_io)
-      
+
       req_header = Protocol::RequestHeader.new(
         api_key: Protocol::SaslHandshakeRequest::API_KEY,
         api_version: Protocol::SaslHandshakeRequest::API_VERSION,
         correlation_id: next_correlation_id,
         client_id: @client_id
       )
-      
+
       req_header.serialize(handshake_enc)
       handshake_req.serialize(handshake_enc)
-      
+
       conn.send_request(handshake_io.to_slice)
-      
+
       response_io = conn.read_response
       response_dec = Protocol::Decoder.new(response_io)
-      
+
       Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
       handshake_resp = Protocol::SaslHandshakeResponse.deserialize(response_dec)
-      
+
       if handshake_resp.error_code != 0
         raise "SASL Handshake failed with error code: #{handshake_resp.error_code}"
       end
@@ -96,28 +96,28 @@ module Kafkaesque
       # 2. SASL Authenticate
       payload = Protocol::SaslAuthenticateRequest.oauthbearer_payload(token, @host, @port)
       auth_req = Protocol::SaslAuthenticateRequest.new(payload)
-      
+
       auth_io = IO::Memory.new
       auth_enc = Protocol::Encoder.new(auth_io)
-      
+
       auth_header = Protocol::RequestHeader.new(
         api_key: Protocol::SaslAuthenticateRequest::API_KEY,
         api_version: Protocol::SaslAuthenticateRequest::API_VERSION,
         correlation_id: next_correlation_id,
         client_id: @client_id
       )
-      
+
       auth_header.serialize(auth_enc)
       auth_req.serialize(auth_enc)
-      
+
       conn.send_request(auth_io.to_slice)
-      
+
       auth_response_io = conn.read_response
       auth_response_dec = Protocol::Decoder.new(auth_response_io)
-      
+
       Protocol::ResponseHeader.deserialize(auth_response_dec, flexible: false)
       auth_resp = Protocol::SaslAuthenticateResponse.deserialize(auth_response_dec)
-      
+
       if auth_resp.error_code != 0
         raise "SASL Authentication failed: #{auth_resp.error_message} (code: #{auth_resp.error_code})"
       end
@@ -125,27 +125,27 @@ module Kafkaesque
 
     def fetch_metadata(topics : Array(String)? = nil) : Protocol::MetadataResponse
       conn = @connection || raise "Client is not connected. Call #connect first."
-      
+
       req = Protocol::MetadataRequest.new(topics)
-      
+
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)
-      
+
       req_header = Protocol::RequestHeader.new(
         api_key: Protocol::MetadataRequest::API_KEY,
         api_version: Protocol::MetadataRequest::API_VERSION,
         correlation_id: next_correlation_id,
         client_id: @client_id
       )
-      
+
       req_header.serialize(req_enc)
       req.serialize(req_enc)
-      
+
       conn.send_request(req_io.to_slice)
-      
+
       response_io = conn.read_response
       response_dec = Protocol::Decoder.new(response_io)
-      
+
       Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
       Protocol::MetadataResponse.deserialize(response_dec)
     end
@@ -243,14 +243,14 @@ module Kafkaesque
 
     def emit_stats
       return if @stats_callbacks.empty?
-      
+
       stats_json = {
-        "client_id" => @client_id,
-        "produced_messages" => @produced_messages_count,
-        "produced_bytes" => @produced_bytes_count,
-        "consumed_messages" => @consumed_messages_count,
+        "client_id"          => @client_id,
+        "produced_messages"  => @produced_messages_count,
+        "produced_bytes"     => @produced_bytes_count,
+        "consumed_messages"  => @consumed_messages_count,
         "broker_connections" => @broker_connections.size,
-        "active_coordinator" => @connection.nil? ? false : true
+        "active_coordinator" => @connection.nil? ? false : true,
       }.to_json
 
       @stats_callbacks.each &.call(stats_json)
@@ -262,7 +262,7 @@ module Kafkaesque
       client_id : String = "kafkaesque-crystal",
       oauth_token_provider : (-> String)? = nil,
       use_ssl : Bool = false,
-      ssl_context : OpenSSL::SSL::Context::Client? = nil
+      ssl_context : OpenSSL::SSL::Context::Client? = nil,
     ) : Client
       last_err = nil
       servers.each do |server|
@@ -303,7 +303,6 @@ module Kafkaesque
       @connection.try(&.close)
       @connection = nil
     end
-
 
     private def next_correlation_id : Int32
       @correlation_id += 1

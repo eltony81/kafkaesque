@@ -5,7 +5,7 @@ module Kafkaesque
   class ConfigLoader
     def self.load_producer_config(file_path : String? = nil) : Producer::Config
       config_hash = load_yaml_and_env(file_path)
-      
+
       bootstrap_servers = [] of String
       if bs = config_hash[YAML::Any.new("bootstrap_servers")]?
         if bs.raw.is_a?(Array)
@@ -20,7 +20,7 @@ module Kafkaesque
       end
 
       compression_type = config_hash[YAML::Any.new("compression_type")]?.try(&.to_s)
-      
+
       settings = {} of String => String
       if raw_settings = config_hash[YAML::Any.new("settings")]?
         if raw_settings.raw.is_a?(Hash)
@@ -29,13 +29,13 @@ module Kafkaesque
           end
         end
       end
-      
+
       Producer::Config.new(bootstrap_servers: bootstrap_servers, compression_type: compression_type, settings: settings)
     end
 
     def self.load_consumer_config(file_path : String? = nil) : Consumer::Config
       config_hash = load_yaml_and_env(file_path)
-      
+
       bootstrap_servers = [] of String
       if bs = config_hash[YAML::Any.new("bootstrap_servers")]?
         if bs.raw.is_a?(Array)
@@ -51,7 +51,7 @@ module Kafkaesque
 
       group_id = config_hash[YAML::Any.new("group_id")]?.try(&.to_s)
       initial_offset_smallest = config_hash[YAML::Any.new("initial_offset_smallest")]?.try(&.to_s) == "true"
-      
+
       settings = {} of String => String
       if raw_settings = config_hash[YAML::Any.new("settings")]?
         if raw_settings.raw.is_a?(Hash)
@@ -60,7 +60,7 @@ module Kafkaesque
           end
         end
       end
-      
+
       Consumer::Config.new(
         bootstrap_servers: bootstrap_servers,
         group_id: group_id,
@@ -71,7 +71,7 @@ module Kafkaesque
 
     private def self.load_yaml_and_env(file_path : String?) : Hash(YAML::Any, YAML::Any)
       base_config = {} of YAML::Any => YAML::Any
-      
+
       # 1. Load from YAML file if exists
       if file_path && File.exists?(file_path)
         begin

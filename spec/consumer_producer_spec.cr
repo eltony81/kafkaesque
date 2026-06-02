@@ -52,14 +52,14 @@ describe Kafkaesque::Protocol::FetchRequest do
     io = IO::Memory.new
     encoder = Kafkaesque::Protocol::Encoder.new(io)
     req.serialize(encoder)
-    
+
     # Verify the serialized min_bytes field by parsing it back
     io.rewind
     decoder = Kafkaesque::Protocol::Decoder.new(io)
-    
-    decoder.read_int32.should eq(-1)     # replica_id
-    decoder.read_int32.should eq(1000)   # max_wait_ms
-    decoder.read_int32.should eq(10240)  # min_bytes (should match the custom configured value!)
+
+    decoder.read_int32.should eq(-1)    # replica_id
+    decoder.read_int32.should eq(1000)  # max_wait_ms
+    decoder.read_int32.should eq(10240) # min_bytes (should match the custom configured value!)
   end
 end
 
@@ -67,42 +67,42 @@ describe "Kafkaesque Record Headers & Serialization" do
   it "serializes and deserializes record headers correctly" do
     headers = [
       Kafkaesque::Protocol::RecordHeader.new("userid", "4636cba2-3f74-4098-8284-a68326e646ee"),
-      Kafkaesque::Protocol::RecordHeader.new("correlationid", "uuid-random-abc")
+      Kafkaesque::Protocol::RecordHeader.new("correlationid", "uuid-random-abc"),
     ]
     record = Kafkaesque::Protocol::Record.new("sensor_key", "sensor_val", headers)
-    
+
     io = IO::Memory.new
     record.serialize(io)
-    
+
     io.rewind
     decoder = Kafkaesque::Protocol::Decoder.new(io)
-    
+
     # Skip record-batch metadata details to reach headers count
     size = decoder.read_varint
-    decoder.read_int8        # attributes
-    decoder.read_varlong     # timestamp delta
-    decoder.read_varint      # offset delta
-    
+    decoder.read_int8    # attributes
+    decoder.read_varlong # timestamp delta
+    decoder.read_varint  # offset delta
+
     # Key
     k_len = decoder.read_varint
     k_len.should eq("sensor_key".size)
     io.skip(k_len)
-    
+
     # Value
     v_len = decoder.read_varint
     v_len.should eq("sensor_val".size)
     io.skip(v_len)
-    
+
     # Headers count
     h_count = decoder.read_varint
     h_count.should eq(2)
-    
+
     # Verify first header
     h1_key_len = decoder.read_varint
     h1_key_bytes = Bytes.new(h1_key_len)
     io.read_fully(h1_key_bytes)
     String.new(h1_key_bytes).should eq("userid")
-    
+
     h1_val_len = decoder.read_varint
     h1_val_bytes = Bytes.new(h1_val_len)
     io.read_fully(h1_val_bytes)
@@ -114,7 +114,7 @@ describe "Kafkaesque KIP-848 ConsumerGroupHeartbeat" do
   it "serializes and deserializes ConsumerGroupHeartbeatRequest successfully" do
     topic_id = Bytes.new(16, 7_u8)
     tp = Kafkaesque::Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions.new(topic_id, [0, 1, 2])
-    
+
     req = Kafkaesque::Protocol::ConsumerGroupHeartbeatRequest.new(
       group_id: "test-group",
       member_id: "member-abc",
@@ -123,28 +123,28 @@ describe "Kafkaesque KIP-848 ConsumerGroupHeartbeat" do
       subscribed_topic_names: ["topic-a"],
       topic_partitions: [tp]
     )
-    
+
     io = IO::Memory.new
     encoder = Kafkaesque::Protocol::Encoder.new(io)
     req.serialize(encoder)
-    
+
     io.rewind
     decoder = Kafkaesque::Protocol::Decoder.new(io)
-    
+
     # Verify serializations match properties
     decoder.read_compact_string.should eq("test-group")
     decoder.read_compact_string.should eq("member-abc")
     decoder.read_int32.should eq(5)
     decoder.read_compact_string.should eq("static-pod")
     decoder.read_compact_string.should be_nil # rack_id
-    decoder.read_int32.should eq(30000) # rebalance_timeout
-    
+    decoder.read_int32.should eq(30000)       # rebalance_timeout
+
     topics = decoder.read_compact_array { decoder.read_compact_string }
     topics.should eq(["topic-a"])
-    
+
     decoder.read_compact_string.should be_nil # regex
     decoder.read_compact_string.should be_nil # server_assignor
-    
+
     # Topic partitions array
     partitions_array = decoder.read_compact_array do
       r_uuid = Bytes.new(16)
@@ -161,7 +161,7 @@ describe "Kafkaesque KIP-848 ConsumerGroupHeartbeat" do
   it "deserializes ConsumerGroupHeartbeatResponse with populated assignment" do
     io = IO::Memory.new
     encoder = Kafkaesque::Protocol::Encoder.new(io)
-    
+
     # throttle_time_ms, error_code, error_message, member_id, member_epoch, heartbeat_interval_ms
     encoder.write_int32(100)
     encoder.write_int16(0_i16)
@@ -169,10 +169,10 @@ describe "Kafkaesque KIP-848 ConsumerGroupHeartbeat" do
     encoder.write_compact_string("assigned-member-id")
     encoder.write_int32(10)
     encoder.write_int32(5000)
-    
+
     # has_assignment = 1 (Present)
     encoder.write_int8(1_i8)
-    
+
     # Assignment: topic_partitions compact array (size 1)
     topic_id = Bytes.new(16, 9_u8)
     encoder.write_compact_array([topic_id]) do |uuid|
@@ -182,16 +182,16 @@ describe "Kafkaesque KIP-848 ConsumerGroupHeartbeat" do
     end
     encoder.write_tag_buffer # Assignment tag buffer
     encoder.write_tag_buffer # Response tag buffer
-    
+
     io.rewind
     decoder = Kafkaesque::Protocol::Decoder.new(io)
     resp = Kafkaesque::Protocol::ConsumerGroupHeartbeatResponse.deserialize(decoder)
-    
+
     resp.error_code.should eq(0)
     resp.member_id.should eq("assigned-member-id")
     resp.member_epoch.should eq(10)
     resp.heartbeat_interval_ms.should eq(5000)
-    
+
     assignment = resp.assignment.not_nil!
     assignment.topic_partitions.size.should eq(1)
     assignment.topic_partitions.first.topic_id.should eq(topic_id)
@@ -216,16 +216,16 @@ describe "Kafkaesque Compression Codecs" do
     [1_i16, 2_i16, 3_i16, 4_i16].each do |codec|
       records = [
         Kafkaesque::Protocol::Record.new("key-a-#{codec}", "value-a-#{codec}"),
-        Kafkaesque::Protocol::Record.new("key-b-#{codec}", "value-b-#{codec}")
+        Kafkaesque::Protocol::Record.new("key-b-#{codec}", "value-b-#{codec}"),
       ]
       batch = Kafkaesque::Protocol::RecordBatch.new(records, compression: codec)
-      
+
       io = IO::Memory.new
       batch.serialize(io)
-      
+
       io.rewind
       raw_bytes = io.to_slice
-      
+
       deserialized = Kafkaesque::Protocol::RecordBatch.deserialize_from_bytes(raw_bytes)
       deserialized.size.should eq(2)
       deserialized[0].key.should eq("key-a-#{codec}")
@@ -259,12 +259,12 @@ describe "Kafkaesque Telemetry & Stats" do
       port: 9092,
       client_id: "test-stats-client"
     )
-    
+
     received_stats = ""
     client.on_stats do |stats|
       received_stats = stats
     end
-    
+
     client.emit_stats
     received_stats.should_not be_empty
     received_stats.should contain("test-stats-client")
@@ -313,31 +313,30 @@ describe "Kafkaesque Parity Features" do
 
   it "supports setting delivery and rebalance callbacks" do
     producer_config = Kafkaesque::Producer::Config.new(["localhost:9092"])
-    # Don't try to initialize the real connection in tests without broker running, 
+    # Don't try to initialize the real connection in tests without broker running,
     # but we can test Consumer callbacks setup
     consumer_config = Kafkaesque::Consumer::Config.new(["localhost:9092"])
     consumer = Kafkaesque::Consumer.new(consumer_config)
-    
+
     assigned_called = false
     consumer.on_partitions_assigned do |parts|
       assigned_called = true
     end
-    
+
     revoked_called = false
     consumer.on_partitions_revoked do |parts|
       revoked_called = true
     end
-    
+
     # Trigger callbacks internally to verify they are stored and callable
     if cb = consumer.@on_partitions_assigned
       cb.call([0, 1])
     end
     assigned_called.should be_true
-    
+
     if cb = consumer.@on_partitions_revoked
       cb.call([0, 1])
     end
     revoked_called.should be_true
   end
 end
-

@@ -1,8 +1,8 @@
 module Kafkaesque
   module Protocol
     struct AddPartitionsToTxnRequest
-      API_KEY = 24_i16
-      API_VERSION = 0_i16
+      API_KEY     = 24_i16
+      API_VERSION =  0_i16
 
       property transactional_id : String
       property producer_id : Int64
@@ -51,8 +51,8 @@ module Kafkaesque
     end
 
     struct EndTxnRequest
-      API_KEY = 26_i16
-      API_VERSION = 0_i16
+      API_KEY     = 26_i16
+      API_VERSION =  0_i16
 
       property transactional_id : String
       property producer_id : Int64
@@ -84,8 +84,8 @@ module Kafkaesque
     end
 
     struct TxnOffsetCommitRequest
-      API_KEY = 28_i16
-      API_VERSION = 0_i16
+      API_KEY     = 28_i16
+      API_VERSION =  0_i16
 
       property transactional_id : String
       property group_id : String

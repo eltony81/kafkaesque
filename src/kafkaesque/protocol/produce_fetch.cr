@@ -25,16 +25,16 @@ module Kafkaesque
       def serialize(io : IO, first_timestamp_ms : Int64 = Time.utc.to_unix_ms, offset_delta : Int32 = 0)
         buffer = IO::Memory.new
         encoder = Encoder.new(buffer)
-        
+
         encoder.write_int8(0_i8) # attributes
-        
+
         t_delta = 0_i64
         if ts = @timestamp
           t_delta = ts.to_unix_ms - first_timestamp_ms
         end
-        encoder.write_varlong(t_delta) # timestamp delta
+        encoder.write_varlong(t_delta)     # timestamp delta
         encoder.write_varint(offset_delta) # offset delta
-        
+
         if @key.nil?
           encoder.write_varint(-1)
         else
@@ -86,28 +86,28 @@ module Kafkaesque
 
         batch_start_pos = io.pos
 
-        encoder.write_int32(-1) # partition leader epoch
+        encoder.write_int32(-1)  # partition leader epoch
         encoder.write_int8(2_i8) # magic byte
 
         crc_pos = encoder.reserve_uint32
 
         crc_start_pos = io.pos
 
-        encoder.write_int16(@compression) # attributes (lowest 3 bits define compression: 1 = GZIP)
+        encoder.write_int16(@compression)      # attributes (lowest 3 bits define compression: 1 = GZIP)
         encoder.write_int32(@records.size - 1) # last offset delta
-        
+
         first_t = @records.compact_map(&.timestamp).min? || Time.utc
         max_t = @records.compact_map(&.timestamp).max? || first_t
         first_timestamp_ms = first_t.to_unix_ms
         max_timestamp_ms = max_t.to_unix_ms
-        
+
         encoder.write_int64(first_timestamp_ms) # first timestamp
-        encoder.write_int64(max_timestamp_ms) # max timestamp
-        
-        encoder.write_int64(@producer_id) # producer id
+        encoder.write_int64(max_timestamp_ms)   # max timestamp
+
+        encoder.write_int64(@producer_id)    # producer id
         encoder.write_int16(@producer_epoch) # producer epoch
-        encoder.write_int32(@base_sequence) # base sequence
-        
+        encoder.write_int32(@base_sequence)  # base sequence
+
         encoder.write_int32(@records.size) # record count
 
         if @compression > 0_i16
@@ -231,7 +231,7 @@ module Kafkaesque
     end
 
     struct ProduceRequest
-      API_KEY = 0_i16
+      API_KEY     = 0_i16
       API_VERSION = 7_i16
 
       property acks : Int16
@@ -305,7 +305,7 @@ module Kafkaesque
     end
 
     struct FetchRequest
-      API_KEY = 1_i16
+      API_KEY     = 1_i16
       API_VERSION = 4_i16
 
       property topic : String
@@ -318,18 +318,18 @@ module Kafkaesque
       end
 
       def serialize(encoder : Encoder)
-        encoder.write_int32(-1) # replica_id
-        encoder.write_int32(1000) # max_wait_ms
+        encoder.write_int32(-1)         # replica_id
+        encoder.write_int32(1000)       # max_wait_ms
         encoder.write_int32(@min_bytes) # min_bytes
         encoder.write_int32(@max_bytes) # max_bytes
-        encoder.write_int8(0_i8) # isolation_level
+        encoder.write_int8(0_i8)        # isolation_level
 
         encoder.write_array([@topic]) do |topic_name|
           encoder.write_string(topic_name)
           encoder.write_array([@partition]) do |part_idx|
             encoder.write_int32(part_idx)
             encoder.write_int64(@fetch_offset) # fetch_offset
-            encoder.write_int32(1048576) # partition_max_bytes
+            encoder.write_int32(1048576)       # partition_max_bytes
           end
         end
       end
@@ -354,13 +354,12 @@ module Kafkaesque
             error_code = decoder.read_int16
             high_watermark = decoder.read_int64
             last_stable_offset = decoder.read_int64
-            
+
             decoder.read_array do
               decoder.read_int64 # producer_id
               decoder.read_int64 # first_offset
             end
 
-            
             raw_bytes = decoder.read_bytes
             if !raw_bytes.nil? && !raw_bytes.empty?
               records = RecordBatch.deserialize_from_bytes(raw_bytes, partition: partition_idx)
@@ -371,6 +370,7 @@ module Kafkaesque
         FetchResponse.new(error_code, records)
       end
     end
+
     # -----------------------------------------------------------------------
     # ListOffsets protocol (v1) — used to find earliest/latest partition offsets
     # timestamp: -2 = earliest, -1 = latest
@@ -403,14 +403,14 @@ module Kafkaesque
 
       def self.deserialize(decoder : Decoder) : ListOffsetsResponse
         error_code = 0_i16
-        offset     = -1_i64
+        offset = -1_i64
         decoder.read_array do
           _topic = decoder.read_string
           decoder.read_array do
             _partition = decoder.read_int32
             error_code = decoder.read_int16
-            _timestamp = decoder.read_int64  # v1: timestamp field
-            offset     = decoder.read_int64
+            _timestamp = decoder.read_int64 # v1: timestamp field
+            offset = decoder.read_int64
           end
         end
         ListOffsetsResponse.new(error_code, offset)

@@ -1,8 +1,8 @@
 module Kafkaesque
   module Protocol
     struct SaslHandshakeRequest
-      API_KEY = 17_i16
-      API_VERSION = 1_i16
+      API_KEY     = 17_i16
+      API_VERSION =  1_i16
 
       property mechanism : String
 
@@ -29,8 +29,8 @@ module Kafkaesque
     end
 
     struct SaslAuthenticateRequest
-      API_KEY = 36_i16
-      API_VERSION = 1_i16
+      API_KEY     = 36_i16
+      API_VERSION =  1_i16
 
       property auth_bytes : Bytes
 

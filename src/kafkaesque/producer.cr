@@ -19,7 +19,7 @@ module Kafkaesque
         if endpoint = @settings["sasl.oauthbearer.token.endpoint.url"]?
           client_id = @settings["sasl.oauthbearer.client.id"]? || ""
           client_secret = @settings["sasl.oauthbearer.client.secret"]? || ""
-          
+
           @oauth_token_provider = -> {
             response = HTTP::Client.post(
               endpoint,
@@ -55,7 +55,7 @@ module Kafkaesque
         client_id: @config.settings["client.id"]? || "kafkaesque-producer",
         oauth_token_provider: @config.oauth_token_provider
       )
-      
+
       # Configure batch accumulator options from settings
       if linger_ms = @config.settings["linger.ms"]?
         client.batch_linger_ms = linger_ms.to_i
@@ -103,7 +103,7 @@ module Kafkaesque
       if @in_transaction
         raise "Transaction already in progress"
       end
-      
+
       client = @client || raise "Producer is closed"
       if client.producer_id < 0
         client.init_producer_id(tx_id)

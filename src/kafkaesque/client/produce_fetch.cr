@@ -5,7 +5,7 @@ module Kafkaesque
     # -----------------------------------------------------------------------
     def produce(topic : String, key : String?, value : String?, partition : Int32 = 0, headers : Array(Protocol::RecordHeader) = [] of Protocol::RecordHeader, timestamp : Time? = nil) : Protocol::ProduceResponse
       conn = connection_for_partition(topic, partition)
-      
+
       record = Protocol::Record.new(key, value, headers, timestamp: timestamp)
 
       base_seq = -1
@@ -25,10 +25,10 @@ module Kafkaesque
         producer_epoch: @producer_epoch,
         base_sequence: base_seq
       )
-      
+
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)
-      
+
       req_header = Protocol::RequestHeader.new(
         api_key: Protocol::ProduceRequest::API_KEY,
         api_version: Protocol::ProduceRequest::API_VERSION,
@@ -36,15 +36,15 @@ module Kafkaesque
         client_id: @client_id,
         flexible: false
       )
-      
+
       req_header.serialize(req_enc)
       req.serialize(req_enc)
-      
+
       conn.send_request(req_io.to_slice)
-      
+
       response_io = conn.read_response
       response_dec = Protocol::Decoder.new(response_io)
-      
+
       Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
       resp = Protocol::ProduceResponse.deserialize(response_dec)
       if cb = @on_deliver
@@ -216,12 +216,12 @@ module Kafkaesque
     # -----------------------------------------------------------------------
     def fetch(topic : String, partition : Int32 = 0, fetch_offset : Int64 = 0_i64, min_bytes : Int32 = 1) : Protocol::FetchResponse
       conn = connection_for_partition(topic, partition)
-      
+
       req = Protocol::FetchRequest.new(topic, partition, fetch_offset, min_bytes)
-      
+
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)
-      
+
       req_header = Protocol::RequestHeader.new(
         api_key: Protocol::FetchRequest::API_KEY,
         api_version: Protocol::FetchRequest::API_VERSION,
@@ -229,15 +229,15 @@ module Kafkaesque
         client_id: @client_id,
         flexible: false
       )
-      
+
       req_header.serialize(req_enc)
       req.serialize(req_enc)
-      
+
       conn.send_request(req_io.to_slice)
-      
+
       response_io = conn.read_response
       response_dec = Protocol::Decoder.new(response_io)
-      
+
       Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
       resp = Protocol::FetchResponse.deserialize(response_dec)
       @consumed_messages_count += resp.records.size

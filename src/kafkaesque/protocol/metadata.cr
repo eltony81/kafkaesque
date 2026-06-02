@@ -32,10 +32,10 @@ module Kafkaesque
         error_code = decoder.read_int16
         partition_index = decoder.read_int32
         leader_id = decoder.read_int32
-        
+
         replica_nodes = decoder.read_array { decoder.read_int32 } || [] of Int32
         isr_nodes = decoder.read_array { decoder.read_int32 } || [] of Int32
-        
+
         PartitionMetadata.new(error_code, partition_index, leader_id, replica_nodes, isr_nodes)
       end
     end
@@ -59,7 +59,7 @@ module Kafkaesque
     end
 
     struct MetadataRequest
-      API_KEY = 3_i16
+      API_KEY     = 3_i16
       API_VERSION = 2_i16
 
       property topics : Array(String)?
