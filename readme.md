@@ -40,14 +40,15 @@ consumer_config = Kafkaesque::ConfigLoader.load_consumer_config(config_file)
 A complete YAML configuration (`config.yml`):
 
 ```yaml
-bootstrap_servers:
+bootstrap_servers:                     # Shared: List of brokers
   - "localhost:9093"
-group_id: "my-consumer-group"
-initial_offset_smallest: "true" # "true" resets to earliest if no commit exists, "false" resets to latest
-compression_type: "lz4"         # gzip, snappy, lz4, zstd
+group_id: "my-consumer-group"          # Consumer-only: Consumer group identifier
+initial_offset_smallest: "true"        # Consumer-only: "true" resets to earliest offset, "false" to latest
+compression_type: "lz4"                # Producer-only: gzip, snappy, lz4, zstd
 
 # Custom settings maps directly under settings
 settings:
+  # Producer-only settings
   enable.idempotence: "true"
   acks: "all"
   linger.ms: "20"
@@ -55,7 +56,7 @@ settings:
   retries: "5"
   retry.backoff.ms: "100"
   
-  # OAuthBearer / OIDC authentication settings
+  # Shared OAuthBearer / OIDC authentication settings
   sasl.oauthbearer.token.endpoint.url: "http://localhost:8080/realms/kafka-auth/protocol/openid-connect/token"
   sasl.oauthbearer.client.id: "kafka-client"
   sasl.oauthbearer.client.secret: "kafka-secret"
