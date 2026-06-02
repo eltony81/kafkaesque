@@ -405,9 +405,9 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 
 | Rank | Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
 | :---: | :--- | :--- | :---: | :---: | :---: |
-| #1 | **Franz-Go** | **Go** | **Pure Native** | **0.06s** | **166,667.0 msg/s** |
-| #2 | **Kafkaesque** | **Crystal** | **Pure Native** | **0.07s** | **142,857.0 msg/s** |
-| #3 | **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.07s** | **142,857.0 msg/s** |
+| #1 | **Kafkaesque** | **Crystal** | **Pure Native** | **0.06s** | **166,667.0 msg/s** |
+| #2 | **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.08s** | **125,000.0 msg/s** |
+| #3 | **Franz-Go** | **Go** | **Pure Native** | **0.10s** | **100,000.0 msg/s** |
 | #4 | **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.53s** | **18,867.9 msg/s** |
 
 ### 📥 Stress Test Consumer Throughput (10,000 messages)
@@ -415,10 +415,10 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 
 | Rank | Client Engine | Language | Group Protocol | Execution Time | Throughput |
 | :---: | :--- | :--- | :---: | :---: | :---: |
-| #1 | **Franz-Go** | **Go** | **KIP-848 (Next-Gen)** | **0.00011s** | **91,235,048.9 msg/s** |
-| #2 | **Kafkaesque (Optimized)** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00037s** | **26,764,589.4 msg/s** |
-| #3 | **Crafka** | **Crystal** | Classic | **0.07436s** | **134,488.4 msg/s** |
-| #4 | **Go Confluent** | **Go** | **KIP-848 (Next-Gen)** | **0.10252s** | **97,543.4 msg/s** |
+| #1 | **Franz-Go** | **Go** | **KIP-848 (Next-Gen)** | **0.00022s** | **46,355,098.6 msg/s** |
+| #2 | **Kafkaesque (Optimized)** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00028s** | **35,900,584.1 msg/s** |
+| #3 | **Go Confluent** | **Go** | **KIP-848 (Next-Gen)** | **0.08053s** | **124,176.4 msg/s** |
+| #4 | **Crafka** | **Crystal** | Classic | **0.26214s** | **38,147.3 msg/s** |
 
 ---
 
