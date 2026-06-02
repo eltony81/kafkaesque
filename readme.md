@@ -226,6 +226,36 @@ end
 
 ---
 
+## Supported Kafka Protocol Versions & Features
+
+Kafkaesque implements a native Crystal serialization engine that directly communicates with Kafka brokers. The table below lists the API keys, protocol versions used under-the-hood, and associated features:
+
+| API Key | API Name | Protocol Version | Features / Implementation Notes |
+| :---: | :--- | :---: | :--- |
+| **0** | `Produce` | `v7` | Supports message headers, record batching, idempotence metadata (`producer_id`, `producer_epoch`), and transactional envelopes. |
+| **1** | `Fetch` | `v4` | Downloads record batches with key/value extraction and header parsing. |
+| **2** | `ListOffsets` | `v1` | Retrieves logical partition boundary offsets (earliest/latest). |
+| **3** | `Metadata` | `v2` | Resolves topic-partition topology and maps partition leader hosts. |
+| **8** | `OffsetCommit` | `v2` | Commits individual partition consumer group offsets to coordinator brokers. |
+| **9** | `OffsetFetch` | `v1` | Queries the current group's committed partition offsets. |
+| **10** | `FindCoordinator` | `v2` | Resolves coordinator node endpoints for dynamic consumer groups. |
+| **11** | `JoinGroup` | `v0` | Used during legacy consumer group join. |
+| **14** | `Heartbeat` | `v1` | Keeps legacy consumer dynamic membership heartbeat active. |
+| **17** | `SaslHandshake` | `v1` | Initiates authentication protocols. |
+| **36** | `SaslAuthenticate` | `v1` | Passes dynamic tokens (Plain or OAuthBearer OIDC access tokens) to the broker. |
+| **22** | `InitProducerId` | `v0` | Fetches a transactional producer ID and current epoch. |
+| **24** | `AddPartitionsToTxn` | `v0` | Registers partitions inside an active transactional transaction context. |
+| **26** | `EndTxn` | `v0` | Atomically commits or aborts a multi-partition transaction scope. |
+| **84** | `ConsumerGroupHeartbeat`| `v1` | **KIP-848 Next-Gen Consumer Group Coordination**: Implements server-side partition assignments, rolling memberships, and dynamic balance loops. |
+
+### Features Summary
+1. **Next-Generation Consumer Protocol**: Out-of-the-box support for **KIP-848** (Consumer Group Heartbeat v1) to minimize client-side rebalance complexities and connection storms.
+2. **Exactly-Once Semantics (EOS)**: Support for transactional writes and idempotent producers.
+3. **Container-Oriented Design**: Fully configurable through declarative YAML files and container environment variables.
+4. **Native Authentication**: Support for SASL Plaintext and dynamic OAuthBearer/OIDC (Keycloak, Okta, etc.) credential fetching under-the-hood.
+
+---
+
 ## License
 
 This project is licensed under the MIT License.
