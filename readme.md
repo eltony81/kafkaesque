@@ -384,20 +384,20 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 
 | Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
 | :--- | :--- | :---: | :---: | :---: |
-| **Kafkaesque** | **Crystal** | **Pure Native** | **0.012s** | **8,333.3 msg/s** |
-| **Franz-Go** | **Go** | **Pure Native** | **0.043s** | **2,325.6 msg/s** |
-| **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.114s** | **877.2 msg/s** |
-| **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.528s** | **189.4 msg/s** |
+| **Kafkaesque** | **Crystal** | **Pure Native** | **0.018s** | **5,555.6 msg/s** |
+| **Franz-Go** | **Go** | **Pure Native** | **0.017s** | **5,882.4 msg/s** |
+| **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.115s** | **869.6 msg/s** |
+| **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.526s** | **190.1 msg/s** |
 
 ### 📥 Consumer Throughput (100 messages)
 *Note: To isolate network transport and client serialization capabilities from the broker's coordinator lookup/rebalance protocols, consumer benchmarks measure the duration starting from receipt of the first message.*
 
 | Client Engine | Language | Group Protocol | Execution Time | Throughput |
 | :--- | :--- | :---: | :---: | :---: |
-| Franz-Go | Go | KIP-848 (Next-Gen) | <0.001s | 2,974,066.1 msg/s |
-| Go Confluent | Go | KIP-848 (Next-Gen) | <0.001s | 95,593.7 msg/s |
-| Crafka | Crystal | Classic | 0.001s | 79,288.1 msg/s |
-| Kafkaesque (Optimized) | Crystal | KIP-848 (Next-Gen) | <0.002s | 70,314.7 msg/s (1,804,565.6 msg/s peak) |
+| Franz-Go | Go | KIP-848 (Next-Gen) | <0.001s | 3,484,442.0 msg/s |
+| **Kafkaesque (Optimized)** | **Crystal** | **KIP-848 (Next-Gen)** | **<0.001s** | **1,763,139.8 msg/s** |
+| Go Confluent | Go | KIP-848 (Next-Gen) | <0.001s | 173,649.7 msg/s |
+| Crafka | Crystal | Classic | 0.001s | 88,438.0 msg/s |
 
 ---
 
