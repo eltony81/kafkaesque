@@ -334,7 +334,7 @@ Log.setup(:debug)
 
 ## Benchmarks
 
-Here is a performance comparison of Kafkaesque (pure Crystal) against Go Confluent (`confluent-kafka-go` wrapping `librdkafka`) and Crafka (Crystal C-wrapper) on a local Kafka cluster.
+Here is a performance comparison of Kafkaesque (pure Crystal) against Go Confluent (`confluent-kafka-go` wrapping `librdkafka`), Crafka (Crystal C-wrapper), and **Franz-Go** (`github.com/twmb/franz-go` pure Go library).
 
 ### 🖥️ Benchmark Environment & Hardware
 * **CPU**: 8-Core Intel Core i7 / AMD Ryzen (Hyper-Threaded, Local Host Execution)
@@ -369,12 +369,14 @@ Along with the payload, each message is accompanied by metadata key string `"sen
   - `compression.type`: `lz4`
   - `linger.ms`: `20`
   - `batch.num.messages`: `10000`
+  - Go Confluent optimized with delivery reports disabled (`"go.delivery.reports": false`).
   - All clients use asynchronous queuing and are synchronously flushed exactly once at the end of the 100-message loop.
 * **Consumer settings**:
-  - `group.protocol`: `consumer` (Next-generation **KIP-848** membership protocol, supported by Kafkaesque and Go Confluent; Crafka runs on `classic` group protocol).
+  - `group.protocol`: `consumer` (Next-generation **KIP-848** membership protocol, supported by Kafkaesque, Go Confluent, and Franz-Go; Crafka runs on `classic` group protocol).
   - `fetch.min.bytes`: `1`
+  - `fetch.wait.max.ms` / `fetch.max.wait.ms`: `5ms` (for `librdkafka` clients).
   - Kafkaesque runs its background prefetching engine on Crystal fibers utilizing a 1000-message buffer channel.
-  - Go Confluent/Crafka rely on `librdkafka`'s internal C-thread prefetch queues (configured via `queued.min.messages`, defaulting to 100,000 messages).
+  - Franz-Go / Go Confluent rely on `librdkafka`'s internal C-thread prefetch queues (configured via `queued.min.messages`, defaulting to 100,000 messages).
 
 ---
 
@@ -383,16 +385,19 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 | Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
 | :--- | :--- | :---: | :---: | :---: |
 | **Kafkaesque** | **Crystal** | **Pure Native** | **0.013s** | **7,692.3 msg/s** |
-| **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.112s** | **892.8 msg/s** |
-| **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.531s** | **188.3 msg/s** |
+| **Franz-Go** | **Go** | **Pure Native** | **0.031s** | **3,225.8 msg/s** |
+| **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.117s** | **854.7 msg/s** |
+| **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.524s** | **190.8 msg/s** |
 
 ### 📥 Consumer Throughput (100 messages)
+*Note: To isolate network transport and client serialization capabilities from the broker's coordinator lookup/rebalance protocols, consumer benchmarks measure the duration starting from receipt of the first message.*
 
 | Client Engine | Language | Group Protocol | Execution Time | Throughput |
 | :--- | :--- | :---: | :---: | :---: |
-| **Kafkaesque** | **Crystal** | **KIP-848 (Next-Gen)** | **0.016s** | **6,356.1 msg/s** |
-| **Go Confluent** | **Go** | KIP-848 (Next-Gen) | **0.113s** | **887.5 msg/s** |
-| **Crafka** | **Crystal** | Classic | **3.170s** | **31.6 msg/s** |
+| **Franz-Go** | **Go** | **KIP-848 (Next-Gen)** | **<0.001s** | **332,021.8 msg/s** |
+| **Go Confluent** | **Go** | **KIP-848 (Next-Gen)** | **<0.001s** | **156,622.2 msg/s** |
+| **Crafka** | **Crystal** | Classic | **0.001s** | **79,360.0 msg/s** |
+| **Kafkaesque** | **Crystal** | **KIP-848 (Next-Gen)** | **0.004s** | **21,670.0 msg/s** |
 
 ---
 
