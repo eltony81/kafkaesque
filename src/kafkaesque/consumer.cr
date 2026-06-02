@@ -103,11 +103,11 @@ module Kafkaesque
     @on_partitions_assigned : (Array(Int32) -> Void)? = nil
     @on_partitions_revoked : (Array(Int32) -> Void)? = nil
 
-    @partition_offsets = Hash(Int32, Int64).new
+    @partition_offsets = Hash(Tuple(String, Int32), Int64).new
     @offset_mutex = Mutex.new
 
     @prefetch_channel : Channel(Array(Protocol::Record))
-    @active_fetchers : Hash(Int32, Bool)
+    @active_fetchers : Hash(Tuple(String, Int32), Bool)
 
     def self.new(&block : Config ->)
       cfg = Config.build(&block)
@@ -115,10 +115,10 @@ module Kafkaesque
     end
 
     def initialize(@config : Config)
-      @partition_offsets = Hash(Int32, Int64).new
+      @partition_offsets = Hash(Tuple(String, Int32), Int64).new
       @offset_mutex = Mutex.new
       @prefetch_channel = Channel(Array(Protocol::Record)).new(100)
-      @active_fetchers = Hash(Int32, Bool).new
+      @active_fetchers = Hash(Tuple(String, Int32), Bool).new
     end
 
     def on_partitions_assigned(&block : Array(Int32) -> Void)
@@ -141,6 +141,21 @@ module Kafkaesque
       @subscription_pattern = pattern
     end
 
+    # Explicit manual partition assignments
+    getter manual_assignments : Array(TopicPartition)? = nil
+
+    # Assigns the consumer to a list of topic-partition pairs manually.
+    # Bypasses group coordination and heartbeat loops.
+    def assign(topic_partitions : Array(TopicPartition))
+      @topics.clear
+      @subscription_pattern = nil
+      @manual_assignments = topic_partitions
+    end
+
+    def assign(topic_partition : TopicPartition)
+      assign([topic_partition])
+    end
+
     def each(&block : Protocol::Record ->)
       if @config.bootstrap_servers.empty?
         raise "No bootstrap servers configured"
@@ -149,6 +164,78 @@ module Kafkaesque
       if pattern = @subscription_pattern
         resolve_regex_topics(pattern)
         spawn_regex_monitor_loop(pattern)
+      end
+
+      is_smallest = @config.initial_offset_smallest || @config.settings["auto.offset.reset"]? == "smallest"
+      default_initial_offset = is_smallest ? 0_i64 : -1_i64
+
+      if assignments = @manual_assignments
+        max_retries = (@config.settings["retries"]? || @config.settings["max_retries"]?).try(&.to_i) || 3
+        client = Client.connect_first(
+          servers: @config.bootstrap_servers,
+          sasl_token: @config.sasl_token,
+          client_id: @config.settings["client.id"]? || "kafkaesque-consumer-manual",
+          oauth_token_provider: @config.oauth_token_provider,
+          max_retries: max_retries
+        )
+        @client = client
+
+        @assigned_partitions = assignments.map(&.partition).uniq
+
+        @offset_mutex.synchronize do
+          @partition_offsets.clear
+          assignments.each do |tp|
+            @partition_offsets[{tp.topic, tp.partition}] = default_initial_offset
+          end
+        end
+
+        if group_id_present = @config.settings["group.id"]?
+          begin
+            coord_client = resolve_coordinator(group_id_present)
+            assignments.each do |tp|
+              fetch_resp = coord_client.offset_fetch(group_id_present, tp.topic, tp.partition)
+              if fetch_resp.error_code == 0 && fetch_resp.committed_offset >= 0
+                @offset_mutex.synchronize do
+                  @partition_offsets[{tp.topic, tp.partition}] = fetch_resp.committed_offset
+                end
+              end
+            end
+            coord_client.close rescue nil
+          rescue ex
+            # fallback
+          end
+        end
+
+        # Warm up partition metadata
+        begin
+          client.fetch_metadata(assignments.map(&.topic).uniq)
+        rescue ex
+          Log.debug { "Metadata prefetch warning: #{ex.message}" }
+        end
+
+        # Spawn background fetchers
+        assignments.each do |tp|
+          offset = @offset_mutex.synchronize { @partition_offsets[{tp.topic, tp.partition}]? } || default_initial_offset
+          @active_fetchers[{tp.topic, tp.partition}] = true
+          spawn_fetcher(tp.topic, tp.partition, offset, client)
+        end
+
+        # Stream records from prefetch queue
+        begin
+          while @running
+            select
+            when records = @prefetch_channel.receive
+              records.each do |record|
+                block.call(record)
+              end
+            end
+          end
+        rescue ex : Exception
+          raise ex unless ex.is_a?(Channel::ClosedError)
+        ensure
+          close_internal
+        end
+        return
       end
 
       group_id = @config.settings["group.id"]? || "default-group"
@@ -201,22 +288,22 @@ module Kafkaesque
 
       is_smallest = @config.initial_offset_smallest || @config.settings["auto.offset.reset"]? == "smallest"
       default_initial_offset = is_smallest ? 0_i64 : -1_i64
+      topic_name = @topics.first? || ""
 
       @offset_mutex.synchronize do
         @partition_offsets.clear
         @assigned_partitions.each do |part|
-          @partition_offsets[part] = default_initial_offset
+          @partition_offsets[{topic_name, part}] = default_initial_offset
         end
       end
 
       # For each assigned partition, try to fetch the committed offset
-      topic_name = @topics.first? || ""
       @hb_mutex.synchronize { @assigned_partitions.dup }.each do |part|
         begin
           fetch_resp = coord_client.offset_fetch(group_id, topic_name, part)
           if fetch_resp.error_code == 0 && fetch_resp.committed_offset >= 0
             @offset_mutex.synchronize do
-              @partition_offsets[part] = fetch_resp.committed_offset
+              @partition_offsets[{topic_name, part}] = fetch_resp.committed_offset
             end
             Log.debug { "Resuming partition #{part} from committed offset #{fetch_resp.committed_offset}" }
           end
@@ -236,8 +323,8 @@ module Kafkaesque
 
       # Spawn background fetchers for assigned partitions
       @hb_mutex.synchronize { @assigned_partitions.dup }.each do |part|
-        offset = @offset_mutex.synchronize { @partition_offsets[part]? } || default_initial_offset
-        @active_fetchers[part] = true
+        offset = @offset_mutex.synchronize { @partition_offsets[{topic_name, part}]? } || default_initial_offset
+        @active_fetchers[{topic_name, part}] = true
         spawn_fetcher(topic_name, part, offset, coord_client)
       end
 
@@ -253,7 +340,7 @@ module Kafkaesque
             # Commit current offsets for all assigned partitions
             parts = @hb_mutex.synchronize { @assigned_partitions.dup }
             parts.each do |part|
-              offset = @offset_mutex.synchronize { @partition_offsets[part]? }
+              offset = @offset_mutex.synchronize { @partition_offsets[{topic_name, part}]? }
               next if offset.nil? || offset < 0_i64
 
               begin
@@ -285,6 +372,8 @@ module Kafkaesque
             Fiber.yield
           end
         end
+      rescue ex : Exception
+        raise ex unless ex.is_a?(Channel::ClosedError)
       ensure
         close_internal
       end
@@ -360,6 +449,8 @@ module Kafkaesque
           new_partitions.concat(tp.partitions)
         end
 
+        topic_name = @topics.first? || ""
+
         if @assigned_partitions != new_partitions
           if cb_rev = @on_partitions_revoked
             cb_rev.call(@assigned_partitions)
@@ -371,25 +462,24 @@ module Kafkaesque
 
           @offset_mutex.synchronize do
             # Keep offsets for partitions that are still assigned, initialize new ones
-            new_offsets = Hash(Int32, Int64).new
+            new_offsets = Hash(Tuple(String, Int32), Int64).new
             new_partitions.each do |part|
-              new_offsets[part] = @partition_offsets[part]? || default_initial_offset
+              new_offsets[{topic_name, part}] = @partition_offsets[{topic_name, part}]? || default_initial_offset
             end
             @partition_offsets = new_offsets
           end
 
           # If coordinator client is already connected, try fetching committed offsets for new partitions
           if coord = @coordinator_client
-            topic_name = @topics.first? || ""
             group_id = @config.settings["group.id"]? || "default-group"
             new_partitions.each do |part|
               # Only fetch if it was not already tracked/valid
-              next if @partition_offsets[part]? && @partition_offsets[part] >= 0_i64
+              next if @partition_offsets[{topic_name, part}]? && @partition_offsets[{topic_name, part}] >= 0_i64
               begin
                 fetch_resp = coord.offset_fetch(group_id, topic_name, part)
                 if fetch_resp.error_code == 0 && fetch_resp.committed_offset >= 0
                   @offset_mutex.synchronize do
-                    @partition_offsets[part] = fetch_resp.committed_offset
+                    @partition_offsets[{topic_name, part}] = fetch_resp.committed_offset
                   end
                   Log.debug { "Resuming partition #{part} from committed offset #{fetch_resp.committed_offset}" }
                 end
@@ -401,10 +491,9 @@ module Kafkaesque
 
           # Spawn fetchers for new partitions:
           if @running && !@prefetch_channel.closed? && (coord = @coordinator_client)
-            topic_name = @topics.first? || ""
             (new_partitions - @assigned_partitions).each do |part|
-              offset = @offset_mutex.synchronize { @partition_offsets[part]? } || default_initial_offset
-              @active_fetchers[part] = true
+              offset = @offset_mutex.synchronize { @partition_offsets[{topic_name, part}]? } || default_initial_offset
+              @active_fetchers[{topic_name, part}] = true
               spawn_fetcher(topic_name, part, offset, coord)
             end
           end
@@ -420,13 +509,13 @@ module Kafkaesque
     end
 
     private def spawn_fetcher(topic : String, partition : Int32, start_offset : Int64, client : Client)
-      @offset_mutex.synchronize { @partition_offsets[partition] = start_offset }
+      @offset_mutex.synchronize { @partition_offsets[{topic, partition}] = start_offset }
 
       spawn do
         current_offset = start_offset
         fetch_min_bytes = (@config.settings["fetch.min.bytes"]? || "1").to_i
 
-        while @running && @active_fetchers[partition]?
+        while @running && @active_fetchers[{topic, partition}]?
           begin
             poll_resp = client.fetch(topic, partition: partition, fetch_offset: current_offset, min_bytes: fetch_min_bytes)
             if poll_resp.error_code == 0
@@ -436,7 +525,7 @@ module Kafkaesque
                 @prefetch_channel.send(poll_resp.records)
                 if last_record = poll_resp.records.last?
                   current_offset = last_record.offset + 1
-                  @offset_mutex.synchronize { @partition_offsets[partition] = current_offset }
+                  @offset_mutex.synchronize { @partition_offsets[{topic, partition}] = current_offset }
                 end
               end
             elsif poll_resp.error_code == 1
@@ -444,7 +533,7 @@ module Kafkaesque
               list_resp = client.list_offsets(topic, partition, Client::TIMESTAMP_EARLIEST)
               if list_resp.error_code == 0 && list_resp.offset >= 0
                 current_offset = list_resp.offset
-                @offset_mutex.synchronize { @partition_offsets[partition] = current_offset }
+                @offset_mutex.synchronize { @partition_offsets[{topic, partition}] = current_offset }
               else
                 sleep 100.milliseconds
               end
@@ -456,7 +545,7 @@ module Kafkaesque
             sleep 500.milliseconds
           end
         end
-        @active_fetchers.delete(partition)
+        @active_fetchers.delete({topic, partition})
       end
     end
 
@@ -530,6 +619,10 @@ module Kafkaesque
         end
         client.close
         @coordinator_client = nil
+      end
+      if client = @client
+        client.close rescue nil
+        @client = nil
       end
     end
 

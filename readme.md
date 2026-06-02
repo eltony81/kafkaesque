@@ -284,7 +284,32 @@ ensure
 end
 ```
 
-### 5. Unit Testing with Mock Broker
+### 5. Manual Partition Assignment
+
+If you need to consume from a specific set of partitions without dynamic consumer group partition assignment (rebalances) or group heartbeats, you can assign them manually using `Consumer#assign`.
+
+```crystal
+require "kafkaesque"
+
+config = Kafkaesque::Consumer::Config.new(["localhost:9092"])
+consumer = Kafkaesque::Consumer.new(config)
+
+# Manually assign partition 0 and 1 of "my-topic"
+consumer.assign([
+  Kafkaesque::TopicPartition.new("my-topic", 0),
+  Kafkaesque::TopicPartition.new("my-topic", 1)
+])
+
+begin
+  consumer.each do |message|
+    puts "Topic: #{message.topic} | Partition: #{message.partition} | Value: #{message.value}"
+  end
+ensure
+  consumer.close
+end
+```
+
+### 6. Unit Testing with Mock Broker
 
 Kafkaesque provides a built-in `MockBroker` to verify your application's consumer or producer logic locally without needing a live Kafka container.
 
@@ -391,7 +416,8 @@ Evented streaming client supporting server-side KIP-848 partition coordination.
 
 #### Public Methods
 * **`subscribe(topics : Array(String))`** / **`subscribe(*topics : String)`**: Subscribes the consumer to one or more topics.
-* **`each(&block : Protocol::Record ->)`**: Starts the partition fetch loops on background fibers, initiates membership heartbeat loop, and blocks the current fiber streaming received records sequentially to the block.
+* **`assign(topic_partitions : Array(TopicPartition))`** / **`assign(topic_partition : TopicPartition)`**: Manually assigns the consumer to specific topic-partition pairs, bypassing consumer group coordination.
+* **`each(&block : Protocol::Record ->)`**: Starts the partition fetch loops on background fibers, initiates membership heartbeat loop (if subscribed to a consumer group), and blocks the current fiber streaming received records sequentially to the block.
 * **`on_partitions_assigned(&block : Array(Int32) -> Void)`**: Callback triggered when the broker coordinator assigns partition ownership to the consumer member.
 * **`on_partitions_revoked(&block : Array(Int32) -> Void)`**: Callback triggered when ownership of assigned partitions is revoked.
 * **`close`**: Leaves the consumer group cleanly, closes prefetch channels, and terminates connection sockets.
