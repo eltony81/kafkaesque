@@ -401,6 +401,27 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 
 ---
 
+### 📤 Stress Test Producer Throughput (10,000 messages, 100ms Linger)
+
+| Rank | Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
+| :---: | :--- | :--- | :---: | :---: | :---: |
+| #1 | **Franz-Go** | **Go** | **Pure Native** | **0.06s** | **166,667.0 msg/s** |
+| #2 | **Kafkaesque** | **Crystal** | **Pure Native** | **0.07s** | **142,857.0 msg/s** |
+| #3 | **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.07s** | **142,857.0 msg/s** |
+| #4 | **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.53s** | **18,867.9 msg/s** |
+
+### 📥 Stress Test Consumer Throughput (10,000 messages)
+*Note: To isolate network transport and client serialization capabilities from the broker's coordinator lookup/rebalance protocols, consumer benchmarks measure the duration starting from receipt of the first message.*
+
+| Rank | Client Engine | Language | Group Protocol | Execution Time | Throughput |
+| :---: | :--- | :--- | :---: | :---: | :---: |
+| #1 | **Franz-Go** | **Go** | **KIP-848 (Next-Gen)** | **0.00011s** | **91,235,048.9 msg/s** |
+| #2 | **Kafkaesque (Optimized)** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00037s** | **26,764,589.4 msg/s** |
+| #3 | **Crafka** | **Crystal** | Classic | **0.07436s** | **134,488.4 msg/s** |
+| #4 | **Go Confluent** | **Go** | **KIP-848 (Next-Gen)** | **0.10252s** | **97,543.4 msg/s** |
+
+---
+
 ## License
 
 This project is licensed under the MIT License.
