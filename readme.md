@@ -18,6 +18,44 @@ Then run `shards install`.
 
 ---
 
+## System Dependencies & Compilation
+
+Kafkaesque supports TLS/SSL connections and high-performance compression codecs (Snappy, LZ4, Zstandard) via native C bindings. The compiler requires these dependency libraries to link successfully.
+
+### 🐧 Linux (Ubuntu/Debian)
+
+Install the development packages using your package manager:
+```bash
+sudo apt-get install libssl-dev libsnappy-dev liblz4-dev libzstd-dev
+```
+Then build your application:
+```bash
+crystal build src/your_app.cr --release
+```
+
+### 🪟 Windows
+
+On Windows, the Crystal compiler uses the MSVC linker. You need to install and link the libraries using `vcpkg` or `MSYS2`.
+
+#### 1. Dynamic Linking (using `vcpkg`)
+Install the package dependencies:
+```cmd
+vcpkg install openssl:x64-windows snappy:x64-windows lz4:x64-windows zstd:x64-windows
+vcpkg integrate install
+```
+Then compile standardly (MSVC will auto-detect the linked libraries):
+```cmd
+crystal build src/your_app.cr --release
+```
+
+#### 2. Static Linking (Standalone Executable)
+To generate a self-contained `.exe` without requiring external DLLs, pass the static libraries as link flags:
+```cmd
+crystal build src/your_app.cr --release --link-flags="lz4_static.lib zstd_static.lib snappy_static.lib libssl.lib libcrypto.lib"
+```
+
+---
+
 ## Configuration
 
 Kafkaesque configurations can be constructed programmatically, loaded via a YAML file, or overridden through environment variables (useful for containerized/Docker environments).
