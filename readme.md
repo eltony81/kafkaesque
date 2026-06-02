@@ -433,26 +433,26 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 
 The benchmark lists results for both **Single-Threaded** configurations (running standard Crystal binaries sequentially on one thread) and **Multithreaded** configurations (compiled with Crystal's `-Dpreview_mt` flag and run with `CRYSTAL_WORKERS=8` threads).
 
-| Rank | Client Engine | Concurrency Mode | Language | Native / Wrapper | Execution Time | Throughput |
-| :---: | :--- | :--- | :--- | :---: | :---: | :---: |
-| #1 | **Kafkaesque** | **Multithreaded** | **Crystal** | **Pure Native** | **0.06s** | **166,667.0 msg/s** |
-| #2 | **Kafkaesque** | **Single-Threaded** | **Crystal** | **Pure Native** | **0.07s** | **142,857.0 msg/s** |
-| #3 | Go Confluent | Sequential | Go | C-Wrapper (`librdkafka`) | 0.08s | 125,000.0 msg/s |
-| #4 | Franz-Go | Sequential | Go | Pure Native | 0.08s | 125,000.0 msg/s |
-| #5 | Crafka | Single-Threaded | Crystal | C-Wrapper (`librdkafka`) | 0.54s | 18,518.5 msg/s |
-| #6 | Crafka | Multithreaded | Crystal | C-Wrapper (`librdkafka`) | 0.54s | 18,518.5 msg/s |
+| Rank | Client Engine | Concurrency Mode | Language | Native / Wrapper | Execution Time | Throughput | Peak RAM (RSS) |
+| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| #1 | **Kafkaesque** | **Multithreaded** | **Crystal** | **Pure Native** | **0.07s** | **142,857.0 msg/s** | **47.40 MB** |
+| #2 | Franz-Go | Sequential | Go | Pure Native | 0.07s | 142,857.0 msg/s | 32.66 MB |
+| #3 | **Kafkaesque** | **Single-Threaded** | **Crystal** | **Pure Native** | **0.08s** | **125,000.0 msg/s** | **30.18 MB** |
+| #4 | Go Confluent | Sequential | Go | C-Wrapper (`librdkafka`) | 0.08s | 125,000.0 msg/s | 34.88 MB |
+| #5 | Crafka | Single-Threaded | Crystal | C-Wrapper (`librdkafka`) | 0.53s | 18,867.9 msg/s | 16.44 MB |
+| #6 | Crafka | Multithreaded | Crystal | C-Wrapper (`librdkafka`) | 0.00s | 0.0 msg/s | 0.00 MB |
 
 ### 📥 Consumer Throughput (10,000 messages)
 *Note: To isolate network transport and client serialization capabilities from the broker's coordinator lookup/rebalance protocols, consumer benchmarks measure the duration starting from receipt of the first message.*
 
-| Rank | Client Engine | Concurrency Mode | Language | Group Protocol | Execution Time | Throughput |
-| :---: | :--- | :--- | :--- | :---: | :---: | :---: |
-| #1 | Franz-Go | Sequential | Go | KIP-848 (Next-Gen) | 0.00023s | 43,270,562.2 msg/s |
-| #2 | **Kafkaesque** | **Multithreaded** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00025s** | **39,561,030.8 msg/s** |
-| #3 | **Kafkaesque** | **Single-Threaded** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00078s** | **12,796,363.8 msg/s** |
-| #4 | Go Confluent | Sequential | Go | KIP-848 (Next-Gen) | 0.02979s | 335,688.3 msg/s |
-| #5 | Crafka | Single-Threaded | Crystal | Classic | 0.07345s | 136,142.1 msg/s |
-| #6 | Crafka | Multithreaded | Crystal | Classic | 0.08579s | 116,562.0 msg/s |
+| Rank | Client Engine | Concurrency Mode | Language | Group Protocol | Execution Time | Throughput | Peak RAM (RSS) |
+| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| #1 | Franz-Go | Sequential | Go | KIP-848 (Next-Gen) | 0.00017s | 58,659,971.6 msg/s | 25.14 MB |
+| #2 | **Kafkaesque** | **Single-Threaded** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00018s** | **56,310,428.1 msg/s** | **24.25 MB** |
+| #3 | **Kafkaesque** | **Multithreaded** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00115s** | **8,676,812.2 msg/s** | **31.80 MB** |
+| #4 | Go Confluent | Sequential | Go | KIP-848 (Next-Gen) | 0.02795s | 357,724.5 msg/s | 24.92 MB |
+| #5 | Crafka | Multithreaded | Crystal | Classic | 0.07428s | 134,631.2 msg/s | 24.16 MB |
+| #6 | Crafka | Single-Threaded | Crystal | Classic | 0.08295s | 120,555.7 msg/s | 21.33 MB |
 
 ---
 
