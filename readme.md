@@ -256,6 +256,31 @@ Kafkaesque implements a native Crystal serialization engine that directly commun
 
 ---
 
+## Developer Guide & Diagnostics
+
+### Concurrency & Fiber Safety
+Kafkaesque leverages Crystal's cooperative concurrency model (Fibers) and evented socket I/O.
+- The consumer loop (`Consumer#each`) runs in a non-blocking fashion.
+- Coordination loops (such as heartbeats) execute in a background fiber.
+- Shared resources like offsets and rebalance assignment maps are protected internally using mutual exclusions (`@hb_mutex` and `@offset_mutex`).
+
+### Logging & Diagnostics
+The library routes diagnostic information using Crystal's standard `Log` engine under the `kafkaesque` namespace rather than printing to `STDOUT`.
+
+To enable detailed logging for connection states, rebalances, and transactions, configure logging in your application entrypoint:
+```crystal
+require "log"
+
+# Enable debug logging for the library
+Log.setup(:debug)
+```
+
+### Resiliency & Error Recovery
+- **Connection Drops**: If the connection to the broker is lost, the consumer/producer automatically attempts to reconnect.
+- **Offset Out Of Range**: If a consumer queries an expired offset, it catches the error and auto-resets by querying partition boundaries using `ListOffsets`.
+- **Retries**: Producers retry failed dispatches based on the configured `retries` and `retry.backoff.ms` settings.
+
+
 ## License
 
 This project is licensed under the MIT License.
