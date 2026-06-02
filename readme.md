@@ -392,7 +392,7 @@ Here is a performance comparison of Kafkaesque (pure Crystal) against Go Conflue
 * **Kafka Instance**: Single-node Kafka broker (version 3.7+) running inside a container, exposed on port `9097` (`PLAINTEXT` listener).
 
 ### 📦 Test Data Payload
-The test benchmark transmits **100 messages**, each carrying a complex JSON telemetry payload representing real-time sensor metrics:
+The test benchmark transmits **10,000 messages**, each carrying a complex JSON telemetry payload representing real-time sensor metrics:
 ```json
 {
   "message_index": 42,
@@ -416,58 +416,43 @@ Along with the payload, each message is accompanied by metadata key string `"sen
   - `acks`: `all`
   - `enable.idempotence`: `true`
   - `compression.type`: `lz4`
-  - `linger.ms`: `20`
+  - `linger.ms`: `100`
   - `batch.num.messages`: `10000`
   - Go Confluent optimized with delivery reports disabled (`"go.delivery.reports": false`).
-  - All clients use asynchronous queuing and are synchronously flushed exactly once at the end of the 100-message loop.
+  - All clients use asynchronous queuing and are synchronously flushed exactly once at the end of the 10,000-message loop.
 * **Consumer settings**:
   - `group.protocol`: `consumer` (Next-generation **KIP-848** membership protocol, supported by Kafkaesque, Go Confluent, and Franz-Go; Crafka runs on `classic` group protocol).
   - `fetch.min.bytes`: `1`
   - `fetch.wait.max.ms` / `fetch.max.wait.ms`: `5ms` (for `librdkafka` clients).
-  - Kafkaesque runs its background prefetching engine on Crystal fibers utilizing a batch-level Crystal channel (delivering pre-buffered record batches directly to the consumption loop to eliminate per-message fiber context-switching overhead).
-  - Franz-Go / Go Confluent rely on `librdkafka`'s internal C-thread prefetch queues (configured via `queued.min.messages`, defaulting to 100,000 messages).
+  - Kafkaesque runs its background prefetching engine on Crystal fibers.
+  - Franz-Go / Go Confluent rely on `librdkafka`'s internal C-thread prefetch queues.
 
 ---
 
-### 📤 Producer Throughput (100 messages)
+### 📤 Producer Throughput (10,000 messages, 100ms Linger)
 
-| Rank | Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
-| :---: | :--- | :--- | :---: | :---: | :---: |
-| #1 | **Franz-Go** | **Go** | **Pure Native** | **0.017s** | **5,882.4 msg/s** |
-| #2 | **Kafkaesque** | **Crystal** | **Pure Native** | **0.018s** | **5,555.6 msg/s** |
-| #3 | **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.115s** | **869.6 msg/s** |
-| #4 | **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.526s** | **190.1 msg/s** |
+The benchmark lists results for both **Single-Threaded** configurations (running standard Crystal binaries sequentially on one thread) and **Multithreaded** configurations (compiled with Crystal's `-Dpreview_mt` flag and run with `CRYSTAL_WORKERS=8` threads).
 
-### 📥 Consumer Throughput (100 messages)
+| Rank | Client Engine | Concurrency Mode | Language | Native / Wrapper | Execution Time | Throughput | Peak RAM (RSS) |
+| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| #1 | **Kafkaesque** | **Multithreaded** | **Crystal** | **Pure Native** | **0.07s** | **142,857.0 msg/s** | **47.40 MB** |
+| #2 | Franz-Go | Sequential | Go | Pure Native | 0.07s | 142,857.0 msg/s | 32.66 MB |
+| #3 | **Kafkaesque** | **Single-Threaded** | **Crystal** | **Pure Native** | **0.08s** | **125,000.0 msg/s** | **30.18 MB** |
+| #4 | Go Confluent | Sequential | Go | C-Wrapper (`librdkafka`) | 0.08s | 125,000.0 msg/s | 34.88 MB |
+| #5 | Crafka | Single-Threaded | Crystal | C-Wrapper (`librdkafka`) | 0.53s | 18,867.9 msg/s | 16.44 MB |
+| #6 | Crafka | Multithreaded | Crystal | C-Wrapper (`librdkafka`) | 0.00s | 0.0 msg/s | 0.00 MB |
+
+### 📥 Consumer Throughput (10,000 messages)
 *Note: To isolate network transport and client serialization capabilities from the broker's coordinator lookup/rebalance protocols, consumer benchmarks measure the duration starting from receipt of the first message.*
 
-| Rank | Client Engine | Language | Group Protocol | Execution Time | Throughput |
-| :---: | :--- | :--- | :---: | :---: | :---: |
-| #1 | **Franz-Go** | **Go** | **KIP-848 (Next-Gen)** | **<0.001s** | **3,484,442.0 msg/s** |
-| #2 | **Kafkaesque (Optimized)** | **Crystal** | **KIP-848 (Next-Gen)** | **<0.001s** | **1,763,139.8 msg/s** |
-| #3 | **Go Confluent** | **Go** | **KIP-848 (Next-Gen)** | **<0.001s** | **173,649.7 msg/s** |
-| #4 | **Crafka** | **Crystal** | Classic | **0.001s** | **88,438.0 msg/s** |
-
----
-
-### 📤 Stress Test Producer Throughput (10,000 messages, 100ms Linger)
-
-| Rank | Client Engine | Language | Native / Wrapper | Execution Time | Throughput |
-| :---: | :--- | :--- | :---: | :---: | :---: |
-| #1 | **Kafkaesque** | **Crystal** | **Pure Native** | **0.06s** | **166,667.0 msg/s** |
-| #2 | **Go Confluent** | **Go** | C-Wrapper (`librdkafka`) | **0.08s** | **125,000.0 msg/s** |
-| #3 | **Franz-Go** | **Go** | **Pure Native** | **0.10s** | **100,000.0 msg/s** |
-| #4 | **Crafka** | **Crystal** | C-Wrapper (`librdkafka`) | **0.53s** | **18,867.9 msg/s** |
-
-### 📥 Stress Test Consumer Throughput (10,000 messages)
-*Note: To isolate network transport and client serialization capabilities from the broker's coordinator lookup/rebalance protocols, consumer benchmarks measure the duration starting from receipt of the first message.*
-
-| Rank | Client Engine | Language | Group Protocol | Execution Time | Throughput |
-| :---: | :--- | :--- | :---: | :---: | :---: |
-| #1 | **Franz-Go** | **Go** | **KIP-848 (Next-Gen)** | **0.00022s** | **46,355,098.6 msg/s** |
-| #2 | **Kafkaesque (Optimized)** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00028s** | **35,900,584.1 msg/s** |
-| #3 | **Go Confluent** | **Go** | **KIP-848 (Next-Gen)** | **0.08053s** | **124,176.4 msg/s** |
-| #4 | **Crafka** | **Crystal** | Classic | **0.26214s** | **38,147.3 msg/s** |
+| Rank | Client Engine | Concurrency Mode | Language | Group Protocol | Execution Time | Throughput | Peak RAM (RSS) |
+| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| #1 | Franz-Go | Sequential | Go | KIP-848 (Next-Gen) | 0.00017s | 58,659,971.6 msg/s | 25.14 MB |
+| #2 | **Kafkaesque** | **Single-Threaded** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00018s** | **56,310,428.1 msg/s** | **24.25 MB** |
+| #3 | **Kafkaesque** | **Multithreaded** | **Crystal** | **KIP-848 (Next-Gen)** | **0.00115s** | **8,676,812.2 msg/s** | **31.80 MB** |
+| #4 | Go Confluent | Sequential | Go | KIP-848 (Next-Gen) | 0.02795s | 357,724.5 msg/s | 24.92 MB |
+| #5 | Crafka | Multithreaded | Crystal | Classic | 0.07428s | 134,631.2 msg/s | 24.16 MB |
+| #6 | Crafka | Single-Threaded | Crystal | Classic | 0.08295s | 120,555.7 msg/s | 21.33 MB |
 
 ---
 
