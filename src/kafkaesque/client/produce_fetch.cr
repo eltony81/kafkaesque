@@ -64,7 +64,7 @@ module Kafkaesque
       @batch_mutex.synchronize do
         @produced_messages_count += 1
         @produced_bytes_count += value.is_a?(String) ? value.bytesize : (value.try(&.size) || 0)
-        
+
         # O(1) hash map lookup
         if records = @pending_batch[{topic, partition}]?
           records << record

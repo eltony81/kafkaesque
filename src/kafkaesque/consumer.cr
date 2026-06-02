@@ -105,7 +105,7 @@ module Kafkaesque
     @partition_offsets = Hash(Int32, Int64).new
     @offset_mutex = Mutex.new
 
-    @prefetch_channel : Channel(Protocol::Record)
+    @prefetch_channel : Channel(Array(Protocol::Record))
     @active_fetchers : Hash(Int32, Bool)
 
     def self.new(&block : Config ->)
@@ -116,7 +116,7 @@ module Kafkaesque
     def initialize(@config : Config)
       @partition_offsets = Hash(Int32, Int64).new
       @offset_mutex = Mutex.new
-      @prefetch_channel = Channel(Protocol::Record).new(1000)
+      @prefetch_channel = Channel(Array(Protocol::Record)).new(100)
       @active_fetchers = Hash(Int32, Bool).new
     end
 
@@ -267,8 +267,10 @@ module Kafkaesque
       begin
         while @running
           select
-          when record = @prefetch_channel.receive
-            block.call(record)
+          when records = @prefetch_channel.receive
+            records.each do |record|
+              block.call(record)
+            end
           when timeout(200.milliseconds)
             Fiber.yield
           end
@@ -418,10 +420,9 @@ module Kafkaesque
               if poll_resp.records.empty?
                 sleep 50.milliseconds
               else
-                poll_resp.records.each do |record|
-                  break unless @running && @active_fetchers[partition]?
-                  @prefetch_channel.send(record)
-                  current_offset = record.offset + 1
+                @prefetch_channel.send(poll_resp.records)
+                if last_record = poll_resp.records.last?
+                  current_offset = last_record.offset + 1
                   @offset_mutex.synchronize { @partition_offsets[partition] = current_offset }
                 end
               end

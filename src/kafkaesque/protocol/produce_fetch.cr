@@ -176,8 +176,8 @@ module Kafkaesque
           batch_length = dec.read_int32
           break if io.size - io.pos < batch_length
 
-          batch_data = Bytes.new(batch_length)
-          io.read_fully(batch_data)
+          batch_data = io.to_slice[io.pos, batch_length]
+          io.pos += batch_length
 
           batch_io = IO::Memory.new(batch_data)
           batch_dec = Decoder.new(batch_io)
@@ -213,15 +213,15 @@ module Kafkaesque
             key_len = batch_dec.read_varint
             key_bytes = nil
             if key_len >= 0
-              key_bytes = Bytes.new(key_len)
-              batch_io.read_fully(key_bytes)
+              key_bytes = batch_io.to_slice[batch_io.pos, key_len]
+              batch_io.pos += key_len
             end
 
             val_len = batch_dec.read_varint
             val_bytes = nil
             if val_len >= 0
-              val_bytes = Bytes.new(val_len)
-              batch_io.read_fully(val_bytes)
+              val_bytes = batch_io.to_slice[batch_io.pos, val_len]
+              batch_io.pos += val_len
             end
 
             headers_count = batch_dec.read_varint
@@ -230,16 +230,16 @@ module Kafkaesque
               h_key_len = batch_dec.read_varint
               h_key = ""
               if h_key_len > 0
-                h_key_bytes = Bytes.new(h_key_len)
-                batch_io.read_fully(h_key_bytes)
+                h_key_bytes = batch_io.to_slice[batch_io.pos, h_key_len]
+                batch_io.pos += h_key_len
                 h_key = String.new(h_key_bytes)
               end
 
               h_val_len = batch_dec.read_varint
               h_val_bytes = Bytes.empty
               if h_val_len > 0
-                h_val_bytes = Bytes.new(h_val_len)
-                batch_io.read_fully(h_val_bytes)
+                h_val_bytes = batch_io.to_slice[batch_io.pos, h_val_len]
+                batch_io.pos += h_val_len
               end
 
               rec_headers << RecordHeader.new(h_key, h_val_bytes)
