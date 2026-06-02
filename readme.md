@@ -348,6 +348,18 @@ Static utility module to load configurations.
 
 ---
 
+### `Kafkaesque::Client`
+
+Underlying connection and protocol routing manager client. Handles raw TCP sockets, SASL authentication, metadata refreshes, and partition leader routing.
+
+#### Constructor
+* **`Client.new(host : String, port : Int32, use_ssl : Bool = false, sasl_token : String? = nil, client_id = "kafkaesque-crystal", ssl_context : OpenSSL::SSL::Context::Client? = nil, oauth_token_provider : (-> String)? = nil, max_retries : Int32 = 3)`**: Initializes a new client connection. `max_retries` configures the retry limit (defaults to `3`) for self-healing routing when partition leader changes occur or connection exceptions are encountered.
+
+#### Static Methods
+* **`Client.connect_first(servers : Array(String), sasl_token : String? = nil, client_id : String = "kafkaesque-crystal", oauth_token_provider : (-> String)? = nil, use_ssl : Bool = false, ssl_context : OpenSSL::SSL::Context::Client? = nil, max_retries : Int32 = 3) : Client`**: Attempts connecting sequentially to a list of bootstrap servers, returning the first successful connection.
+
+---
+
 ### `Kafkaesque::Producer`
 
 High-throughput, asynchronous client to write records to Kafka brokers.
