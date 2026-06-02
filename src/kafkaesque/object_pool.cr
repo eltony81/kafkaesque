@@ -1,20 +1,24 @@
 module Kafkaesque
   class ObjectPool(T)
     def initialize(&@factory : -> T)
-      @pool = Deque(T).new
+      @pools = Hash(Thread, Deque(T)).new
       @mutex = Mutex.new
     end
 
     def rent : T
-      @mutex.synchronize do
-        @pool.shift?
-      end || @factory.call
+      thread = Thread.current
+      pool = @mutex.synchronize do
+        @pools[thread] ||= Deque(T).new
+      end
+      pool.shift? || @factory.call
     end
 
     def return(obj : T)
-      @mutex.synchronize do
-        @pool.push(obj)
+      thread = Thread.current
+      pool = @mutex.synchronize do
+        @pools[thread] ||= Deque(T).new
       end
+      pool.push(obj)
     end
   end
 end
