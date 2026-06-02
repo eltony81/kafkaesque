@@ -351,6 +351,8 @@ Kafkaesque is designed to be highly performant by leveraging Crystal's cooperati
    The `Consumer` incorporates an asynchronous prefetch engine. Messages from assigned partitions are fetched in the background by dedicated partition fibers and pushed to an internal channel, allowing the consumption loop (`Consumer#each`) to stream records without sleep delays or polling latency.
 3. **$O(1)$ Batch Accumulation**:
    Record batches are accumulated using a partition-keyed hash map lookup, dropping producer queuing times from $O(N)$ linear scans to $O(1)$.
+4. **Thread-Safe Object Pooling**:
+   To minimize Garbage Collector heap allocation pressure under high stress, Kafkaesque utilizes a thread-safe `ObjectPool` to reuse `IO::Memory` serialization buffers during record and batch dispatches.
 
 ---
 
