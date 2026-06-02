@@ -3,7 +3,7 @@ module Kafkaesque
     # -----------------------------------------------------------------------
     # Produce: single-message produce with optional idempotency
     # -----------------------------------------------------------------------
-    def produce(topic : String, key : String?, value : String?, partition : Int32 = 0, headers : Array(Protocol::RecordHeader) = [] of Protocol::RecordHeader, timestamp : Time? = nil) : Protocol::ProduceResponse
+    def produce(topic : String, key : Protocol::BytesOrString?, value : Protocol::BytesOrString?, partition : Int32 = 0, headers : Array(Protocol::RecordHeader) = [] of Protocol::RecordHeader, timestamp : Time? = nil) : Protocol::ProduceResponse
       conn = connection_for_partition(topic, partition)
 
       record = Protocol::Record.new(key, value, headers, timestamp: timestamp)
@@ -58,18 +58,18 @@ module Kafkaesque
     # Batching Accumulator: queue records for background dispatch
     # -----------------------------------------------------------------------
 
-    def batch_produce(topic : String, key : String?, value : String?, partition : Int32 = 0, headers : Array(Protocol::RecordHeader) = [] of Protocol::RecordHeader, timestamp : Time? = nil)
+    def batch_produce(topic : String, key : Protocol::BytesOrString?, value : Protocol::BytesOrString?, partition : Int32 = 0, headers : Array(Protocol::RecordHeader) = [] of Protocol::RecordHeader, timestamp : Time? = nil)
       record = Protocol::Record.new(key, value, headers, timestamp: timestamp)
-      entry = BatchEntry.new(topic, partition, [record])
 
       @batch_mutex.synchronize do
         @produced_messages_count += 1
-        @produced_bytes_count += value.try(&.bytesize) || 0
-        existing = @pending_batch.find { |e| e.topic == topic && e.partition == partition }
-        if existing
-          existing.records << record
+        @produced_bytes_count += value.is_a?(String) ? value.bytesize : (value.try(&.size) || 0)
+        
+        # O(1) hash map lookup
+        if records = @pending_batch[{topic, partition}]?
+          records << record
         else
-          @pending_batch << entry
+          @pending_batch[{topic, partition}] = [record]
         end
       end
 
@@ -77,7 +77,7 @@ module Kafkaesque
         start_batch_fiber
       end
 
-      total = @batch_mutex.synchronize { @pending_batch.sum(&.records.size) }
+      total = @batch_mutex.synchronize { @pending_batch.sum { |_, recs| recs.size } }
       if total >= @batch_max_size
         @batch_channel.send(nil) rescue nil
       end
@@ -91,27 +91,27 @@ module Kafkaesque
       end
 
       responses = [] of Protocol::ProduceResponse
-      entries.each do |entry|
+      entries.each do |(topic, partition), records|
         base_seq = -1
         if idempotent?
-          slot = "#{entry.topic}:#{entry.partition}"
+          slot = "#{topic}:#{partition}"
           base_seq = @sequence_numbers.fetch(slot, 0)
-          @sequence_numbers[slot] = base_seq + entry.records.size
+          @sequence_numbers[slot] = base_seq + records.size
         end
 
         req = Protocol::ProduceRequest.new(
           acks: @acks,
           timeout_ms: 5000_i32,
-          topic: entry.topic,
-          records: entry.records,
-          partition: entry.partition,
+          topic: topic,
+          records: records,
+          partition: partition,
           producer_id: @producer_id,
           producer_epoch: @producer_epoch,
           base_sequence: base_seq,
           compression: @compression
         )
 
-        conn = connection_for_partition(entry.topic, entry.partition)
+        conn = connection_for_partition(topic, partition)
         req_io = IO::Memory.new
         req_enc = Protocol::Encoder.new(req_io)
 

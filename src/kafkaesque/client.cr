@@ -23,7 +23,7 @@ module Kafkaesque
     property acks : Int16 = 1_i16
     property compression : Int16 = 0_i16
     @batch_mutex : Mutex = Mutex.new
-    @pending_batch : Array(BatchEntry) = [] of BatchEntry
+    @pending_batch : Hash(Tuple(String, Int32), Array(Protocol::Record)) = {} of Tuple(String, Int32) => Array(Protocol::Record)
     @batch_channel : Channel(Nil) = Channel(Nil).new(1)
     @batch_fiber_running : Bool = false
 

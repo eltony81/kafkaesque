@@ -3,23 +3,52 @@ require "./crc32c"
 
 module Kafkaesque
   module Protocol
+    alias BytesOrString = Bytes | String
+
     struct RecordHeader
       property key : String
-      property value : String
+      @value : Bytes
 
-      def initialize(@key, @value)
+      def initialize(@key : String, value : BytesOrString)
+        @value = value.is_a?(String) ? value.to_slice : value
+      end
+
+      def value : String
+        String.new(@value)
+      end
+
+      def value_bytes : Bytes
+        @value
       end
     end
 
     struct Record
-      property key : String?
-      property value : String?
+      @key : Bytes?
+      @value : Bytes?
       property headers : Array(RecordHeader)
       property partition : Int32 = 0
       property offset : Int64 = 0_i64
       property timestamp : Time? = nil
 
-      def initialize(@key, @value, @headers = [] of RecordHeader, @partition = 0, @offset = 0_i64, @timestamp = nil)
+      def initialize(key : BytesOrString?, value : BytesOrString?, @headers = [] of RecordHeader, @partition = 0, @offset = 0_i64, @timestamp = nil)
+        @key = key.is_a?(String) ? key.to_slice : key
+        @value = value.is_a?(String) ? value.to_slice : value
+      end
+
+      def key : String?
+        @key ? String.new(@key.not_nil!) : nil
+      end
+
+      def value : String?
+        @value ? String.new(@value.not_nil!) : nil
+      end
+
+      def key_bytes : Bytes?
+        @key
+      end
+
+      def value_bytes : Bytes?
+        @value
       end
 
       def serialize(io : IO, first_timestamp_ms : Int64 = Time.utc.to_unix_ms, offset_delta : Int32 = 0)
@@ -35,18 +64,16 @@ module Kafkaesque
         encoder.write_varlong(t_delta)     # timestamp delta
         encoder.write_varint(offset_delta) # offset delta
 
-        if @key.nil?
+        if (k_bytes = @key).nil?
           encoder.write_varint(-1)
         else
-          k_bytes = @key.not_nil!.to_slice
           encoder.write_varint(k_bytes.size)
           buffer.write(k_bytes)
         end
 
-        if @value.nil?
+        if (v_bytes = @value).nil?
           encoder.write_varint(-1)
         else
-          v_bytes = @value.not_nil!.to_slice
           encoder.write_varint(v_bytes.size)
           buffer.write(v_bytes)
         end
@@ -57,7 +84,7 @@ module Kafkaesque
           encoder.write_varint(k_bytes.size)
           buffer.write(k_bytes)
 
-          v_bytes = hdr.value.to_slice
+          v_bytes = hdr.value_bytes
           encoder.write_varint(v_bytes.size)
           buffer.write(v_bytes)
         end
@@ -184,19 +211,17 @@ module Kafkaesque
             offset_delta = batch_dec.read_varint
 
             key_len = batch_dec.read_varint
-            key = nil
+            key_bytes = nil
             if key_len >= 0
               key_bytes = Bytes.new(key_len)
               batch_io.read_fully(key_bytes)
-              key = String.new(key_bytes)
             end
 
             val_len = batch_dec.read_varint
-            value = nil
+            val_bytes = nil
             if val_len >= 0
               val_bytes = Bytes.new(val_len)
               batch_io.read_fully(val_bytes)
-              value = String.new(val_bytes)
             end
 
             headers_count = batch_dec.read_varint
@@ -211,18 +236,17 @@ module Kafkaesque
               end
 
               h_val_len = batch_dec.read_varint
-              h_val = ""
+              h_val_bytes = Bytes.empty
               if h_val_len > 0
                 h_val_bytes = Bytes.new(h_val_len)
                 batch_io.read_fully(h_val_bytes)
-                h_val = String.new(h_val_bytes)
               end
 
-              rec_headers << RecordHeader.new(h_key, h_val)
+              rec_headers << RecordHeader.new(h_key, h_val_bytes)
             end
 
             record_timestamp = Time.unix_ms(first_timestamp + timestamp_delta)
-            records << Record.new(key, value, rec_headers, partition, base_offset + offset_delta.to_i64, record_timestamp)
+            records << Record.new(key_bytes, val_bytes, rec_headers, partition, base_offset + offset_delta.to_i64, record_timestamp)
           end
         end
 

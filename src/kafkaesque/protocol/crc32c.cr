@@ -3,7 +3,7 @@ module Kafkaesque
     module CRC32C
       POLY = 0x82F63B78_u32
 
-      TABLE = Array(UInt32).new(256) do |i|
+      TABLE = StaticArray(UInt32, 256).new do |i|
         crc = i.to_u32
         8.times do
           if (crc & 1) != 0

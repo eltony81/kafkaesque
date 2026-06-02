@@ -6,8 +6,49 @@ module Kafkaesque
       property oauth_token_provider : (-> String)? = nil
       property compression_type : String? = nil
 
-      def initialize(@bootstrap_servers, @compression_type = nil, @settings = {} of String => String)
+      def initialize(bootstrap_servers : Array(String) = ["localhost:9092"], compression_type : String? = nil, settings = {} of String => String)
+        @bootstrap_servers = bootstrap_servers
+        @compression_type = compression_type
+        @settings = settings
         setup_oauth_provider
+      end
+
+      def self.build(&block : Config ->)
+        cfg = new(bootstrap_servers: [] of String)
+        block.call(cfg)
+        cfg
+      end
+
+      def linger_ms=(val : Int32)
+        set("linger.ms", val.to_s)
+      end
+
+      def linger_ms : Int32
+        @settings["linger.ms"]?.try(&.to_i) || 0
+      end
+
+      def batch_num_messages=(val : Int32)
+        set("batch.num.messages", val.to_s)
+      end
+
+      def batch_num_messages : Int32
+        @settings["batch.num.messages"]?.try(&.to_i) || 1000
+      end
+
+      def idempotence=(val : Bool)
+        set("enable.idempotence", val.to_s)
+      end
+
+      def idempotence : Bool
+        @settings["enable.idempotence"]? == "true"
+      end
+
+      def acks=(val : String)
+        set("acks", val)
+      end
+
+      def acks : String
+        @settings["acks"]? || "1"
       end
 
       def set(key : String, value : String)
@@ -40,6 +81,11 @@ module Kafkaesque
     @transactional_id : String?
     @in_transaction : Bool = false
     @txn_partitions : Set(String) = Set(String).new
+
+    def self.new(&block : Config ->)
+      cfg = Config.build(&block)
+      new(cfg)
+    end
 
     def initialize(@config : Config)
       if @config.bootstrap_servers.empty?
@@ -169,7 +215,7 @@ module Kafkaesque
       end
     end
 
-    def produce(topic : String, payload : Bytes, key : Bytes? = nil, headers : Hash(String, String) = {} of String => String, partition : Int32 = 0, timestamp : Time? = nil)
+    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Hash(String, String) = {} of String => String, partition : Int32 = 0, timestamp : Time? = nil)
       client = @client || raise "Producer is closed"
 
       if @in_transaction && (tx_id = @transactional_id)
@@ -179,9 +225,6 @@ module Kafkaesque
           @txn_partitions.add(slot)
         end
       end
-
-      payload_str = String.new(payload)
-      key_str = key ? String.new(key) : nil
 
       record_headers = [] of Protocol::RecordHeader
       headers.each do |k, v|
@@ -194,7 +237,7 @@ module Kafkaesque
       attempts = 0
       loop do
         begin
-          client.batch_produce(topic, key_str, payload_str, partition: partition, headers: record_headers, timestamp: timestamp)
+          client.batch_produce(topic, key, payload, partition: partition, headers: record_headers, timestamp: timestamp)
           break
         rescue ex
           attempts += 1

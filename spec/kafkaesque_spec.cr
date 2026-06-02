@@ -592,4 +592,72 @@ describe Kafkaesque::Protocol do
     topic_a_p1_records.size.should eq(1)
     topic_a_p1_records[0].value.should eq("v4")
   end
+
+  it "optimizes CRC32C with StaticArray" do
+    Kafkaesque::Protocol::CRC32C::TABLE.is_a?(StaticArray(UInt32, 256)).should be_true
+    data = "hello world".to_slice
+    Kafkaesque::Protocol::CRC32C.checksum(data).should eq(3381945770_u32)
+  end
+
+  it "natively supports raw Bytes in Record and RecordHeader without converting to String" do
+    raw_key = Bytes[1, 2, 3, 4]
+    raw_val = Bytes[255, 254, 253]
+    header_val = Bytes[10, 20, 30]
+
+    header = Kafkaesque::Protocol::RecordHeader.new("my-header", header_val)
+    record = Kafkaesque::Protocol::Record.new(raw_key, raw_val, [header])
+
+    # Key/value are stored as Bytes
+    record.key_bytes.should eq(raw_key)
+    record.value_bytes.should eq(raw_val)
+    header.value_bytes.should eq(header_val)
+
+    # String getters still work (lossy/fallback representation)
+    record.key.should_not be_nil
+    record.value.should_not be_nil
+
+    # Serialization and Deserialization round-trip preserves raw bytes exactly
+    batch = Kafkaesque::Protocol::RecordBatch.new([record])
+    io = IO::Memory.new
+    batch.serialize(io)
+
+    io.rewind
+    decoded = Kafkaesque::Protocol::RecordBatch.deserialize_from_bytes(io.to_slice)
+    decoded.size.should eq(1)
+    r = decoded[0]
+    r.key_bytes.should eq(raw_key)
+    r.value_bytes.should eq(raw_val)
+    r.headers.size.should eq(1)
+    r.headers[0].value_bytes.should eq(header_val)
+  end
+
+  it "provides block configuration DSL and typed config properties" do
+    # Producer
+    p_config = Kafkaesque::Producer::Config.build do |c|
+      c.bootstrap_servers = ["localhost:9094"]
+      c.linger_ms = 50
+      c.batch_num_messages = 5000
+      c.idempotence = true
+      c.acks = "all"
+    end
+
+    p_config.bootstrap_servers.should eq(["localhost:9094"])
+    p_config.linger_ms.should eq(50)
+    p_config.batch_num_messages.should eq(5000)
+    p_config.idempotence.should be_true
+    p_config.acks.should eq("all")
+
+    # Consumer
+    c_config = Kafkaesque::Consumer::Config.build do |c|
+      c.bootstrap_servers = ["localhost:9095"]
+      c.group_id = "test-group-dsl"
+      c.auto_commit = false
+      c.auto_commit_interval_ms = 10000
+    end
+
+    c_config.bootstrap_servers.should eq(["localhost:9095"])
+    c_config.group_id.should eq("test-group-dsl")
+    c_config.auto_commit.should be_false
+    c_config.auto_commit_interval_ms.should eq(10000)
+  end
 end

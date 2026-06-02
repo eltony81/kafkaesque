@@ -10,16 +10,50 @@ module Kafkaesque
       property initial_offset_smallest : Bool = false
 
       def initialize(
-        @bootstrap_servers,
+        bootstrap_servers : Array(String) = ["localhost:9092"],
         group_id : String? = nil,
-        @sasl_token : String? = nil,
-        @initial_offset_smallest : Bool = false,
-        @settings = {} of String => String,
+        sasl_token : String? = nil,
+        initial_offset_smallest : Bool = false,
+        settings = {} of String => String,
       )
+        @bootstrap_servers = bootstrap_servers
+        @sasl_token = sasl_token
+        @initial_offset_smallest = initial_offset_smallest
+        @settings = settings
         if group_id
           set("group.id", group_id)
         end
         setup_oauth_provider
+      end
+
+      def self.build(&block : Config ->)
+        cfg = new(bootstrap_servers: [] of String)
+        block.call(cfg)
+        cfg
+      end
+
+      def group_id=(val : String)
+        set("group.id", val)
+      end
+
+      def group_id : String
+        @settings["group.id"]? || "default-group"
+      end
+
+      def auto_commit=(val : Bool)
+        set("enable.auto.commit", val.to_s)
+      end
+
+      def auto_commit : Bool
+        @settings["enable.auto.commit"]? != "false"
+      end
+
+      def auto_commit_interval_ms=(val : Int32)
+        set("auto.commit.interval.ms", val.to_s)
+      end
+
+      def auto_commit_interval_ms : Int32
+        @settings["auto.commit.interval.ms"]?.try(&.to_i) || 5000
       end
 
       def set(key : String, value : String)
@@ -70,6 +104,11 @@ module Kafkaesque
 
     @partition_offsets = Hash(Int32, Int64).new
     @offset_mutex = Mutex.new
+
+    def self.new(&block : Config ->)
+      cfg = Config.build(&block)
+      new(cfg)
+    end
 
     def initialize(@config : Config)
       @partition_offsets = Hash(Int32, Int64).new
