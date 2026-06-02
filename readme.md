@@ -256,6 +256,19 @@ Kafkaesque implements a native Crystal serialization engine that directly commun
 
 ---
 
+## Performance & Optimizations
+
+Kafkaesque is designed to be highly performant by leveraging Crystal's cooperative concurrency:
+
+1. **Direct Socket Writing & `TCP_NODELAY`**:
+   Kafkaesque disables Nagle's algorithm (`tcp_nodelay = true`) on broker connections. Because the library manually manages record batching at the application level, this eliminates socket latency without generating tiny, fragmented network packets.
+2. **Event-Driven Asynchronous Prefetching**:
+   The `Consumer` incorporates an asynchronous prefetch engine. Messages from assigned partitions are fetched in the background by dedicated partition fibers and pushed to an internal channel, allowing the consumption loop (`Consumer#each`) to stream records without sleep delays or polling latency.
+3. **$O(1)$ Batch Accumulation**:
+   Record batches are accumulated using a partition-keyed hash map lookup, dropping producer queuing times from $O(N)$ linear scans to $O(1)$.
+
+---
+
 ## Developer Guide & Diagnostics
 
 ### Concurrency & Fiber Safety
