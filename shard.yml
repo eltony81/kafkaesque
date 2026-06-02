@@ -1,0 +1,13 @@
+name: kafkaesque
+version: 0.1.0
+
+authors:
+  - eltony81
+
+targets:
+  kafkaesque:
+    main: src/kafkaesque.cr
+
+crystal: 1.20.2
+
+license: MIT
