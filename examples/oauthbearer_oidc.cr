@@ -18,7 +18,7 @@ producer = Kafkaesque::Producer.new(producer_config)
 begin
   producer.produce("secure-topic", "Securely transmitted OAuth message")
   producer.flush
-  puts "✅ Message sent securely using OIDC!"
+  puts "[SUCCESS] Message sent securely using OIDC!"
 ensure
   producer.close
 end
@@ -34,7 +34,7 @@ consumer = Kafkaesque::Consumer.new(consumer_config)
 consumer.subscribe(["secure-topic"])
 
 begin
-  puts "🔓 Consumer listening securely..."
+  puts "[START] Consumer listening securely..."
   # Streams secure records from the partition
   # consumer.each do |msg|
   #   puts msg.value

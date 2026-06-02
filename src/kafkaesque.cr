@@ -20,6 +20,6 @@ require "http/client"
 require "uri"
 
 module Kafkaesque
-  VERSION = "0.3.5"
+  VERSION = "0.3.6"
   Log     = ::Log.for("kafkaesque")
 end

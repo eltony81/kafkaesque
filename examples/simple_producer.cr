@@ -17,15 +17,15 @@ producer = Kafkaesque::Producer.new(config)
 # Register message delivery confirmation callbacks
 producer.on_deliver do |topic, partition, offset, exception|
   if exception
-    puts "❌ Delivery failed on #{topic}:#{partition} - #{exception.message}"
+    puts "[ERROR] Delivery failed on #{topic}:#{partition} - #{exception.message}"
   else
-    puts "📤 Delivered message to #{topic}:#{partition} at offset #{offset}"
+    puts "[DELIVERED] Delivered message to #{topic}:#{partition} at offset #{offset}"
   end
 end
 
 begin
   topic = "telemetry-data"
-  puts "🚀 Simple Producer started..."
+  puts "[START] Simple Producer started..."
 
   # Produce 10 complex telemetry events
   10.times do |i|
@@ -47,9 +47,9 @@ begin
   end
 
   # Force-flush any remaining batched messages to the broker socket
-  puts "⏳ Flushing remaining messages..."
+  puts "[FLUSH] Flushing remaining messages..."
   producer.flush(timeout_ms: 5000)
-  puts "✅ Telemetry messages sent successfully!"
+  puts "[SUCCESS] Telemetry messages sent successfully!"
 ensure
   # Cleanly shut down connections
   producer.close

@@ -18,22 +18,22 @@ consumer.subscribe(["telemetry-data"])
 
 # Register rebalance event callbacks
 consumer.on_partitions_assigned do |partitions|
-  puts "📥 Broker assigned partitions ownership: #{partitions}"
+  puts "[ASSIGNED] Broker assigned partitions ownership: #{partitions}"
 end
 
 consumer.on_partitions_revoked do |partitions|
-  puts "📤 Partition ownership revoked by broker: #{partitions}"
+  puts "[REVOKED] Partition ownership revoked by broker: #{partitions}"
 end
 
 # Handle termination signals cleanly
 Process.on_terminate do
-  puts "\n🛑 Shutdown requested. Leaving consumer group..."
+  puts "\n[STOP] Shutdown requested. Leaving consumer group..."
   consumer.close
   exit
 end
 
 begin
-  puts "🚀 Consumer started. Streaming telemetry messages..."
+  puts "[START] Consumer started. Streaming telemetry messages..."
   # Blocks the loop and yields incoming records sequentially
   consumer.each do |message|
     puts "Offset: #{message.offset} | Key: #{message.key} | Payload: #{message.value}"

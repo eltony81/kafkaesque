@@ -15,10 +15,10 @@ producer = Kafkaesque::Producer.new(config)
 
 begin
   # 1. Begin a transactional scope
-  puts "🔑 Beginning transaction..."
+  puts "[TX] Beginning transaction..."
   producer.begin_transaction
 
-  puts "📤 Writing records atomically to multiple topics..."
+  puts "[SEND] Writing records atomically to multiple topics..."
   # Produce to topic-a
   producer.produce(
     topic: "topic-a",
@@ -35,13 +35,13 @@ begin
 
   # 2. Commit writes. The broker registers these offset records
   # atomically across partitions. If one fails, none are visible to read_committed consumers.
-  puts "💾 Committing transaction..."
+  puts "[COMMIT] Committing transaction..."
   producer.commit_transaction
-  puts "✅ Transaction committed successfully!"
+  puts "[SUCCESS] Transaction committed successfully!"
 rescue ex : Exception
   # 3. Rollback all writes in this transaction scope on error
-  puts "❌ Error encountered: #{ex.message}"
-  puts "🛑 Aborting transaction..."
+  puts "[ERROR] Error encountered: #{ex.message}"
+  puts "[ABORT] Aborting transaction..."
   producer.abort_transaction
 ensure
   producer.close
