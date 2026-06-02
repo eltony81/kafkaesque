@@ -20,6 +20,11 @@ jobs:
       with:
         crystal: 1.20.2
 
+    - name: Install System Libraries
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libsnappy-dev liblz4-dev libzstd-dev
+
     - name: Install Shards
       run: shards install
 
