@@ -538,7 +538,7 @@ Along with the payload, each message is accompanied by metadata key string `"sen
   - `fetch.min.bytes`: `1`
   - `fetch.wait.max.ms` / `fetch.max.wait.ms`: `5ms` (for `librdkafka` clients).
   - Kafkaesque runs its background prefetching engine on Crystal fibers.
-  - Franz-Go / Go Confluent rely on Go's internal scheduling channels.
+  - Franz-Go / Go Confluent rely on Go's internal scheduling loops.
 
 ---
 
@@ -547,18 +547,18 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 #### Producer Scoreboard
 | Rank | Client Engine | Execution Time | Throughput | Peak RAM (RSS) |
 | :---: | :--- | :---: | :---: | :---: |
-| #1 | Kafkaesque (Single Thread) | 3.13s | 319,489.0 msg/s | 1,080.05 MB |
-| #2 | Franz-Go | 3.76s | 265,957.0 msg/s | 38.25 MB |
-| #3 | Kafkaesque (Multithread) | 5.58s | 179,211.0 msg/s | 146.71 MB |
-| #4 | Go Confluent | 7.39s | 135,318.0 msg/s | 74.01 MB |
+| #1 | Kafkaesque (Single Thread) | 2.96s | 337,838.0 msg/s | 1,122.66 MB |
+| #2 | Franz-Go | 3.85s | 259,740.0 msg/s | 43.00 MB |
+| #3 | Kafkaesque (Multithread) | 5.71s | 175,131.0 msg/s | 146.74 MB |
+| #4 | Go Confluent | 7.45s | 134,228.0 msg/s | 71.24 MB |
 
 #### Consumer Scoreboard
 | Rank | Client Engine | Execution Time | Throughput | Peak RAM (RSS) |
 | :---: | :--- | :---: | :---: | :---: |
-| #1 | Kafkaesque (Single Thread) | 0.73828s | 1,354,500.9 msg/s | 49.19 MB |
-| #2 | Kafkaesque (Multithread) | 1.18644s | 842,856.7 msg/s | 142.75 MB |
-| #3 | Franz-Go | 1.24553s | 802,870.2 msg/s | 45.96 MB |
-| #4 | Go Confluent | 8.88645s | 112,530.8 msg/s | 83.65 MB |
+| #1 | Kafkaesque (Single Thread) | 0.69469s | 1,439,497.4 msg/s | 49.22 MB |
+| #2 | Kafkaesque (Multithread) | 1.1697s | 854,920.0 msg/s | 142.59 MB |
+| #3 | Franz-Go | 1.27864s | 782,080.7 msg/s | 44.02 MB |
+| #4 | Go Confluent | 8.86942s | 112,746.9 msg/s | 84.15 MB |
 
 ---
 
@@ -567,18 +567,18 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 #### Producer Scoreboard
 | Rank | Client Engine | Execution Time | Throughput | Peak RAM (RSS) |
 | :---: | :--- | :---: | :---: | :---: |
-| #1 | Kafkaesque (Multithread) | 2.84s | 352,113.0 msg/s | 144.81 MB |
-| #2 | Kafkaesque (Single Thread) | 2.88s | 347,222.0 msg/s | 1,078.01 MB |
-| #3 | Franz-Go | 3.60s | 277,778.0 msg/s | 36.88 MB |
-| #4 | Go Confluent | 4.70s | 212,766.0 msg/s | 90.07 MB |
+| #1 | Kafkaesque (Multithread) | 2.87s | 348,432.0 msg/s | 144.63 MB |
+| #2 | Kafkaesque (Single Thread) | 2.92s | 342,466.0 msg/s | 1,122.54 MB |
+| #3 | Franz-Go | 3.58s | 279,330.0 msg/s | 36.96 MB |
+| #4 | Go Confluent | 4.70s | 212,766.0 msg/s | 76.55 MB |
 
 #### Consumer Scoreboard
 | Rank | Client Engine | Execution Time | Throughput | Peak RAM (RSS) |
 | :---: | :--- | :---: | :---: | :---: |
-| #1 | Kafkaesque (Multithread) | 0.40441s | 2,472,728.8 msg/s | 146.65 MB |
-| #2 | Kafkaesque (Single Thread) | 0.76834s | 1,301,506.8 msg/s | 49.58 MB |
-| #3 | Franz-Go | 1.05369s | 949,042.0 msg/s | 36.67 MB |
-| #4 | Go Confluent | 8.64509s | 115,672.6 msg/s | 83.00 MB |
+| #1 | Kafkaesque (Multithread) | 0.31941s | 3,130,748.5 msg/s | 140.64 MB |
+| #2 | Kafkaesque (Single Thread) | 0.75825s | 1,318,827.9 msg/s | 49.55 MB |
+| #3 | Franz-Go | 1.06852s | 935,870.9 msg/s | 37.47 MB |
+| #4 | Go Confluent | 8.64408s | 115,686.1 msg/s | 84.51 MB |
 
 ---
 
