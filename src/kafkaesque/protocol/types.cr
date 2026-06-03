@@ -1,6 +1,6 @@
 module Kafkaesque
   module Protocol
-    class Encoder
+    struct Encoder
       getter io : IO
 
       def initialize(@io : IO)
@@ -150,7 +150,7 @@ module Kafkaesque
       end
     end
 
-    class Decoder
+    struct Decoder
       getter io : IO
 
       def initialize(@io : IO)

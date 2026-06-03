@@ -140,21 +140,26 @@ module Kafkaesque
         while retries > 0
           begin
             conn = connection_for_partition(topic, partition)
-            req_io = IO::Memory.new
-            req_enc = Protocol::Encoder.new(req_io)
+            req_io = Protocol::BUFFER_POOL.rent
+            req_io.clear
+            begin
+              req_enc = Protocol::Encoder.new(req_io)
 
-            req_header = Protocol::RequestHeader.new(
-              api_key: Protocol::ProduceRequest::API_KEY,
-              api_version: Protocol::ProduceRequest::API_VERSION,
-              correlation_id: next_correlation_id,
-              client_id: @client_id,
-              flexible: false
-            )
+              req_header = Protocol::RequestHeader.new(
+                api_key: Protocol::ProduceRequest::API_KEY,
+                api_version: Protocol::ProduceRequest::API_VERSION,
+                correlation_id: next_correlation_id,
+                client_id: @client_id,
+                flexible: false
+              )
 
-            req_header.serialize(req_enc)
-            req.serialize(req_enc)
+              req_header.serialize(req_enc)
+              req.serialize(req_enc)
 
-            conn.send_request(req_io.to_slice)
+              conn.send_request(req_io.to_slice)
+            ensure
+              Protocol::BUFFER_POOL.return(req_io)
+            end
 
             response_io = conn.read_response
             response_dec = Protocol::Decoder.new(response_io)
@@ -273,21 +278,26 @@ module Kafkaesque
         begin
           conn = connection_for_partition(topic, partition)
 
-          req_io = IO::Memory.new
-          req_enc = Protocol::Encoder.new(req_io)
+          req_io = Protocol::BUFFER_POOL.rent
+          req_io.clear
+          begin
+            req_enc = Protocol::Encoder.new(req_io)
 
-          req_header = Protocol::RequestHeader.new(
-            api_key: Protocol::FetchRequest::API_KEY,
-            api_version: Protocol::FetchRequest::API_VERSION,
-            correlation_id: next_correlation_id,
-            client_id: @client_id,
-            flexible: false
-          )
+            req_header = Protocol::RequestHeader.new(
+              api_key: Protocol::FetchRequest::API_KEY,
+              api_version: Protocol::FetchRequest::API_VERSION,
+              correlation_id: next_correlation_id,
+              client_id: @client_id,
+              flexible: false
+            )
 
-          req_header.serialize(req_enc)
-          req.serialize(req_enc)
+            req_header.serialize(req_enc)
+            req.serialize(req_enc)
 
-          conn.send_request(req_io.to_slice)
+            conn.send_request(req_io.to_slice)
+          ensure
+            Protocol::BUFFER_POOL.return(req_io)
+          end
 
           response_io = conn.read_response
           response_dec = Protocol::Decoder.new(response_io)

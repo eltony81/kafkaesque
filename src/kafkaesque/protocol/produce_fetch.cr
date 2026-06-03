@@ -294,16 +294,21 @@ module Kafkaesque
           encoder.write_array([@partition]) do |partition_idx|
             encoder.write_int32(partition_idx)
 
-            batch_io = IO::Memory.new
-            RecordBatch.new(
-              @records,
-              producer_id: @producer_id,
-              producer_epoch: @producer_epoch,
-              base_sequence: @base_sequence,
-              compression: @compression
-            ).serialize(batch_io)
+            batch_io = Protocol::BUFFER_POOL.rent
+            batch_io.clear
+            begin
+              RecordBatch.new(
+                @records,
+                producer_id: @producer_id,
+                producer_epoch: @producer_epoch,
+                base_sequence: @base_sequence,
+                compression: @compression
+              ).serialize(batch_io)
 
-            encoder.write_bytes(batch_io.to_slice)
+              encoder.write_bytes(batch_io.to_slice)
+            ensure
+              Protocol::BUFFER_POOL.return(batch_io)
+            end
           end
         end
       end
