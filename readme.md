@@ -582,6 +582,91 @@ Along with the payload, each message is accompanied by metadata key string `"sen
 
 ---
 
+## Client Configurations
+
+Below are the exact code configuration settings used for each client engine during the benchmarks:
+
+### 1. Kafkaesque (Crystal)
+
+#### Producer Setup
+```crystal
+producer_config = Kafkaesque::Producer::Config.new(
+  bootstrap_servers: ["localhost:9097"],
+  compression_type: "lz4",
+  settings: {
+    "enable.idempotence" => "true",
+    "acks"               => "all",
+    "linger.ms"          => "100",
+    "batch.num.messages" => "10000",
+    "retries"            => "5",
+    "retry.backoff.ms"   => "100",
+  }
+)
+```
+
+#### Consumer Setup
+```crystal
+config = Kafkaesque::Consumer::Config.new(
+  bootstrap_servers: ["localhost:9097"],
+  group_id: "bench-kafkaesque-[timestamp]",
+  initial_offset_smallest: true
+)
+# Note: Defaults to auto-commit enabled and uses "group.protocol": "consumer" (KIP-848 protocol)
+```
+
+### 2. Go Confluent (Go)
+
+#### Producer Setup
+```go
+p, err := kafka.NewProducer(&kafka.ConfigMap{
+    "bootstrap.servers":   "localhost:9097",
+    "compression.type":    "lz4",
+    "enable.idempotence":  true,
+    "acks":                "all",
+    "linger.ms":           100,
+    "batch.num.messages":  10000,
+    "retries":             5,
+    "retry.backoff.ms":    100,
+    "go.delivery.reports": false,
+})
+```
+
+#### Consumer Setup
+```go
+c, err := kafka.NewConsumer(&kafka.ConfigMap{
+    "bootstrap.servers":  "localhost:9097",
+    "group.id":           "bench-go-confluent-[timestamp]",
+    "auto.offset.reset":  "smallest",
+    "enable.auto.commit": true,
+    "group.protocol":     "consumer",
+    "fetch.wait.max.ms":  5,
+})
+```
+
+### 3. Franz-Go (Go)
+
+#### Producer Setup
+```go
+opts := []kgo.Opt{
+    kgo.SeedBrokers("localhost:9097"),
+    kgo.ProducerLinger(time.Duration(lingerMs) * time.Millisecond),
+    kgo.ProducerBatchMaxBytes(1000000),
+    kgo.RequiredAcks(kgo.AllISRAcks()),
+}
+```
+
+#### Consumer Setup
+```go
+opts := []kgo.Opt{
+    kgo.SeedBrokers("localhost:9097"),
+    kgo.ConsumerGroup("bench-go-franz-[timestamp]"),
+    kgo.ConsumeTopics("test-topic"),
+    kgo.GroupProtocol("consumer"),
+}
+```
+
+---
+
 ## License
 
 This project is licensed under the MIT License.
