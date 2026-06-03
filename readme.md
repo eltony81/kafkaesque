@@ -111,6 +111,25 @@ Environment variables take precedence over settings loaded from the YAML file.
 - **`KAFKA_SETTING_<KEY>`**: Any custom setting where `<KEY>` has underscores replaced by dots and is lowercased. E.g., `KAFKA_SETTING_ENABLE_IDEMPOTENCE=true` maps to `enable.idempotence = "true"`.
 - **`KAFKA_SASL_<KEY>`**: Any SASL setting. E.g., `KAFKA_SASL_OAUTHBEARER_CLIENT_ID=kafka-client` maps to `sasl.oauthbearer.client.id = "kafka-client"`.
 
+### Inspecting Configurations
+
+Both the `Producer` and `Consumer` expose a `configurations` method that returns a formatted `String` showing the bootstrap servers and all active configuration settings. This is useful for verbose startup logging and debugging:
+
+```crystal
+puts producer.configurations
+# Or:
+puts consumer.configurations
+```
+
+Example Output:
+```text
+Bootstrap Servers: localhost:9092
+Settings:
+  enable.idempotence: true
+  acks: all
+  linger.ms: 20
+```
+
 ---
 
 ## Configuration Parameter Directory
