@@ -218,7 +218,7 @@ module Kafkaesque
       end
     end
 
-    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Hash(String, String) = {} of String => String, partition : Int32 = 0, timestamp : Time? = nil)
+    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Array(Protocol::RecordHeader)? = nil, partition : Int32 = 0, timestamp : Time? = nil)
       client = @client || raise "Producer is closed"
 
       if @in_transaction && (tx_id = @transactional_id)
@@ -229,18 +229,13 @@ module Kafkaesque
         end
       end
 
-      record_headers = [] of Protocol::RecordHeader
-      headers.each do |k, v|
-        record_headers << Protocol::RecordHeader.new(k, v)
-      end
-
       retries = (@config.settings["retries"]? || "0").to_i
       backoff_ms = (@config.settings["retry.backoff.ms"]? || "100").to_i
 
       attempts = 0
       loop do
         begin
-          client.batch_produce(topic, key, payload, partition: partition, headers: record_headers, timestamp: timestamp)
+          client.batch_produce(topic, key, payload, partition: partition, headers: headers || [] of Protocol::RecordHeader, timestamp: timestamp)
           break
         rescue ex
           attempts += 1
@@ -250,6 +245,17 @@ module Kafkaesque
           sleep backoff_ms.milliseconds
         end
       end
+    end
+
+    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Hash(String, String) = {} of String => String, partition : Int32 = 0, timestamp : Time? = nil)
+      record_headers = nil
+      unless headers.empty?
+        record_headers = Array(Protocol::RecordHeader).new(headers.size)
+        headers.each do |k, v|
+          record_headers << Protocol::RecordHeader.new(k, v)
+        end
+      end
+      produce(topic, payload, key, headers: record_headers, partition: partition, timestamp: timestamp)
     end
 
     def flush(timeout_ms : Int32 = 5000)
