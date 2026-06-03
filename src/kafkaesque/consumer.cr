@@ -666,5 +666,15 @@ module Kafkaesque
         end
       end
     end
+
+    def configurations : String
+      String.build do |str|
+        str << "Bootstrap Servers: #{@config.bootstrap_servers.join(", ")}\n"
+        str << "Settings:\n"
+        @config.settings.each do |k, v|
+          str << "  #{k}: #{v}\n"
+        end
+      end
+    end
   end
 end
