@@ -588,6 +588,15 @@ Below are the exact code configuration settings used for each client engine duri
 
 ### 1. Kafkaesque (Crystal)
 
+**Example Console Startup Output:**
+```
+🚀 Kafkaesque Producer configured and ready (PLAINTEXT, port 9097)
+   Settings: enable.idempotence=true, acks=all, linger.ms=100, batch.num.messages=10000, compression=lz4
+
+🚀 Kafkaesque Consumer started (PLAINTEXT, port 9097)...
+   Settings: group.id=bench-kafkaesque-178047..., initial_offset_smallest=true, group.protocol=consumer
+```
+
 #### Producer Setup
 ```crystal
 producer_config = Kafkaesque::Producer::Config.new(
@@ -615,6 +624,15 @@ config = Kafkaesque::Consumer::Config.new(
 ```
 
 ### 2. Go Confluent (Go)
+
+**Example Console Startup Output:**
+```
+🚀 Go Confluent Producer configured and ready (PLAINTEXT, port 9097)
+   Settings: enable.idempotence=true, acks=all, linger.ms=100, batch.num.messages=10000, compression=lz4, go.delivery.reports=false
+
+🚀 Go Confluent Consumer started (PLAINTEXT, port 9097)...
+   Settings: group.id=bench-go-confluent-178047..., auto.offset.reset=smallest, enable.auto.commit=true, group.protocol=consumer, fetch.wait.max.ms=5
+```
 
 #### Producer Setup
 ```go
@@ -644,6 +662,15 @@ c, err := kafka.NewConsumer(&kafka.ConfigMap{
 ```
 
 ### 3. Franz-Go (Go)
+
+**Example Console Startup Output:**
+```
+🚀 Franz-Go Producer configured and ready (PLAINTEXT, port 9097)
+   Settings: RequiredAcks=all, linger.ms=100, batch.num.messages=10000 (1MB limit), compression=none
+
+🚀 Franz-Go Consumer started (PLAINTEXT, port 9097)...
+   Settings: group.id=bench-go-franz-178047..., auto.offset.reset=smallest (default), group.protocol=consumer
+```
 
 #### Producer Setup
 ```go
