@@ -19,10 +19,10 @@ broker.on_request(3_i16) do |decoder, version|
 
   # Brokers array
   enc.write_array([nil]) do
-    enc.write_int32(1)              # node_id
-    enc.write_string("127.0.0.1")    # host
-    enc.write_int32(broker.port)     # port
-    enc.write_string(nil)            # rack
+    enc.write_int32(1)            # node_id
+    enc.write_string("127.0.0.1") # host
+    enc.write_int32(broker.port)  # port
+    enc.write_string(nil)         # rack
   end
   # Cluster ID
   enc.write_string("mock-cluster")
@@ -31,14 +31,14 @@ broker.on_request(3_i16) do |decoder, version|
 
   # Topics array
   enc.write_array(["test-topic"]) do |name|
-    enc.write_int16(0_i16)        # error_code
-    enc.write_string(name)        # name
-    enc.write_int8(0_i8)          # is_internal
+    enc.write_int16(0_i16) # error_code
+    enc.write_string(name) # name
+    enc.write_int8(0_i8)   # is_internal
     # Partitions
     enc.write_array([nil]) do
-      enc.write_int16(0_i16)      # error_code
-      enc.write_int32(0)          # partition_index
-      enc.write_int32(1)          # leader_id
+      enc.write_int16(0_i16)           # error_code
+      enc.write_int32(0)               # partition_index
+      enc.write_int32(1)               # leader_id
       enc.write_array([] of Int32) { } # replicas
       enc.write_array([] of Int32) { } # isr
     end
@@ -77,7 +77,7 @@ begin
 
   puts "Sending produce request..."
   resp = client.produce("test-topic", "key", "val")
-  
+
   if resp.error_code == 0
     puts "✅ Succeeded! Message written at offset: #{resp.base_offset}"
   else

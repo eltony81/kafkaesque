@@ -21,10 +21,10 @@ describe "Kafkaesque Advanced Features" do
 
       # 1. Brokers array: 1 broker (this mock broker itself)
       enc.write_array([nil]) do
-        enc.write_int32(1)              # node_id
-        enc.write_string("127.0.0.1")    # host
-        enc.write_int32(broker.port)     # port
-        enc.write_string(nil)            # rack
+        enc.write_int32(1)            # node_id
+        enc.write_string("127.0.0.1") # host
+        enc.write_int32(broker.port)  # port
+        enc.write_string(nil)         # rack
       end
 
       # 2. Cluster ID
@@ -34,14 +34,14 @@ describe "Kafkaesque Advanced Features" do
 
       # 4. Topics array
       enc.write_array(["sensor-temperature", "sensor-humidity", "system-log"]) do |name|
-        enc.write_int16(0_i16)        # error_code
-        enc.write_string(name)        # name
-        enc.write_int8(0_i8)          # is_internal (false)
+        enc.write_int16(0_i16) # error_code
+        enc.write_string(name) # name
+        enc.write_int8(0_i8)   # is_internal (false)
         # Partitions array
         enc.write_array([nil]) do
-          enc.write_int16(0_i16)      # error_code
-          enc.write_int32(0)          # partition_index
-          enc.write_int32(1)          # leader_id (broker 1)
+          enc.write_int16(0_i16)           # error_code
+          enc.write_int32(0)               # partition_index
+          enc.write_int32(1)               # leader_id (broker 1)
           enc.write_array([] of Int32) { } # replicas
           enc.write_array([] of Int32) { } # isr
         end
@@ -59,7 +59,7 @@ describe "Kafkaesque Advanced Features" do
 
       # Resolve matching topics
       consumer.subscription_pattern.should_not be_nil
-      
+
       # We simulate what each does when starting:
       consumer.test_resolve_regex_topics(/^sensor-.*$/)
       consumer.@topics.should eq(["sensor-humidity", "sensor-temperature"])
@@ -112,7 +112,7 @@ describe "Kafkaesque Advanced Features" do
       # Decode standard ProduceRequest header details to skip to topic
       decoder.read_int16 # acks
       decoder.read_int32 # timeout
-      
+
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
 
@@ -191,7 +191,7 @@ describe "Kafkaesque Advanced Features" do
       produce_calls += 1
       decoder.read_int16 # acks
       decoder.read_int32 # timeout
-      
+
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
       enc.write_array(["sensor-temp"]) do |topic|

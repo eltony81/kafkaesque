@@ -43,18 +43,18 @@ module Kafkaesque
         begin
           size = socket.read_bytes(Int32, IO::ByteFormat::BigEndian) rescue nil
           break if size.nil? || size <= 0
-          
+
           buf = Bytes.new(size)
           socket.read_fully(buf)
-          
+
           mem = IO::Memory.new(buf)
           decoder = Protocol::Decoder.new(mem)
-          
+
           api_key = decoder.read_int16
           api_version = decoder.read_int16
           correlation_id = decoder.read_int32
           client_id = decoder.read_string
-          
+
           response_body_io = IO::Memory.new
           if handler = @handlers[api_key]?
             body_mem = handler.call(decoder, api_version)
@@ -63,14 +63,14 @@ module Kafkaesque
             # Default response: just error code (0)
             response_body_io.write_bytes(0_i16, IO::ByteFormat::BigEndian)
           end
-          
+
           resp_mem = IO::Memory.new
           resp_size = 4 + response_body_io.size
-          
+
           resp_mem.write_bytes(resp_size.to_i32, IO::ByteFormat::BigEndian)
           resp_mem.write_bytes(correlation_id.to_i32, IO::ByteFormat::BigEndian)
           resp_mem.write(response_body_io.to_slice)
-          
+
           socket.write(resp_mem.to_slice)
           socket.flush
         rescue ex

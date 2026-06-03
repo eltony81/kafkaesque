@@ -50,7 +50,7 @@ module Kafkaesque
 
           Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
           resp = Protocol::ProduceResponse.deserialize(response_dec)
-          
+
           if (resp.error_code == 5 || resp.error_code == 6) && retries > 1
             Log.warn { "Leader change/not available for #{topic}:#{partition}. Refreshing metadata and retrying..." }
             refresh_partition_metadata(topic, "#{topic}:#{partition}")
@@ -294,7 +294,7 @@ module Kafkaesque
 
           Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
           resp = Protocol::FetchResponse.deserialize(response_dec)
-          
+
           if (resp.error_code == 5 || resp.error_code == 6) && retries > 1
             Log.warn { "Leader change/not available for #{topic}:#{partition} in fetch. Refreshing metadata and retrying..." }
             refresh_partition_metadata(topic, "#{topic}:#{partition}")

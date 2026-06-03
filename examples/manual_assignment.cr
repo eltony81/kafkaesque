@@ -44,9 +44,9 @@ broker.on_request(1_i16) do |decoder, version|
     enc.write_string(topic)
     enc.write_array([0]) do |part|
       enc.write_int32(part)
-      enc.write_int16(0_i16) # partition error code
-      enc.write_int64(0_i64) # high_watermark
-      enc.write_int64(0_i64) # last_stable_offset
+      enc.write_int16(0_i16)         # partition error code
+      enc.write_int64(0_i64)         # high_watermark
+      enc.write_int64(0_i64)         # last_stable_offset
       enc.write_array([] of Nil) { } # producer ids array (empty)
 
       record = Kafkaesque::Protocol::Record.new("key".to_slice, "Hello, Kafkaesque Manual Assignment!".to_slice, [] of Kafkaesque::Protocol::RecordHeader)

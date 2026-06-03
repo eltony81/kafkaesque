@@ -43,7 +43,7 @@ describe "Kafkaesque Manual Partition Assignment" do
     # 2. Mock Fetch Request (API KEY 1)
     broker.on_request(1_i16) do |decoder, version|
       fetch_calls += 1
-      
+
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
 
@@ -52,15 +52,15 @@ describe "Kafkaesque Manual Partition Assignment" do
         enc.write_string(topic)
         enc.write_array([0]) do |part|
           enc.write_int32(part)
-          enc.write_int16(0_i16) # partition error code
-          enc.write_int64(0_i64) # high_watermark
-          enc.write_int64(0_i64) # last_stable_offset
+          enc.write_int16(0_i16)         # partition error code
+          enc.write_int64(0_i64)         # high_watermark
+          enc.write_int64(0_i64)         # last_stable_offset
           enc.write_array([] of Nil) { } # producer ids array (empty)
 
           # Serialize 1 RecordBatch
           record = Kafkaesque::Protocol::Record.new("key".to_slice, "val".to_slice, [] of Kafkaesque::Protocol::RecordHeader)
           record.offset = 0_i64
-          
+
           batch = Kafkaesque::Protocol::RecordBatch.new([record])
 
           batch_io = IO::Memory.new
