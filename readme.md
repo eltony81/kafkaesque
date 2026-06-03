@@ -685,7 +685,7 @@ c, err := kafka.NewConsumer(&kafka.ConfigMap{
 **Example Console Startup Output:**
 ```
 🚀 Franz-Go Producer configured and ready (PLAINTEXT, port 9097)
-   Settings: RequiredAcks=all, linger.ms=100, batch.num.messages=10000 (1MB limit), compression=none
+   Settings: RequiredAcks=all, linger.ms=100, batch.num.messages=10000 (1MB limit), compression=lz4
 
 🚀 Franz-Go Consumer started (PLAINTEXT, port 9097)...
    Settings: group.id=bench-go-franz-178047..., auto.offset.reset=smallest (default), group.protocol=consumer
@@ -698,6 +698,7 @@ opts := []kgo.Opt{
     kgo.ProducerLinger(time.Duration(lingerMs) * time.Millisecond),
     kgo.ProducerBatchMaxBytes(1000000),
     kgo.RequiredAcks(kgo.AllISRAcks()),
+    kgo.ProducerBatchCompression(kgo.Lz4Compression()),
 }
 ```
 
