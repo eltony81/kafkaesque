@@ -8,18 +8,21 @@ module Kafkaesque
       property oauth_token_provider : (-> String)? = nil
       property sasl_token : String? = nil
       property initial_offset_smallest : Bool = false
+      property client_rack : String? = nil
 
       def initialize(
         bootstrap_servers : Array(String) = ["localhost:9092"],
         group_id : String? = nil,
         sasl_token : String? = nil,
         initial_offset_smallest : Bool = false,
+        client_rack : String? = nil,
         settings = {} of String => String,
       )
         @bootstrap_servers = bootstrap_servers
         @sasl_token = sasl_token
         @initial_offset_smallest = initial_offset_smallest
         @settings = settings
+        @client_rack = client_rack || settings["client.rack"]?
         if group_id
           set("group.id", group_id)
         end
@@ -156,6 +159,58 @@ module Kafkaesque
       assign([topic_partition])
     end
 
+    def share_each(&block : Protocol::Record ->)
+      if @config.bootstrap_servers.empty?
+        raise "No bootstrap servers configured"
+      end
+
+      max_retries = (@config.settings["retries"]? || @config.settings["max_retries"]?).try(&.to_i) || 3
+      client = Client.connect_first(
+        servers: @config.bootstrap_servers,
+        sasl_token: @config.sasl_token,
+        client_id: @config.settings["client.id"]? || "kafkaesque-share-consumer",
+        oauth_token_provider: @config.oauth_token_provider,
+        max_retries: max_retries
+      )
+      client.client_rack = @config.client_rack
+      @client = client
+
+      group_id = @config.settings["group.id"]? || "default-share-group"
+      topic_name = @topics.first? || raise "No topics subscribed for share group consume"
+
+      Log.debug { "Starting Share Group consumer loop for group: #{group_id}, topic: #{topic_name}" }
+
+      while @running
+        begin
+          resp = client.share_fetch(group_id, @member_id, topic_name, 0)
+          if resp.error_code == 0
+            resp.topics.each do |t|
+              t.partitions.each do |p|
+                p.records.each do |record|
+                  block.call(record)
+                  client.share_acknowledge(
+                    group_id: group_id,
+                    member_id: @member_id,
+                    topic: t.name,
+                    partition: p.partition_index,
+                    first_offset: record.offset,
+                    last_offset: record.offset,
+                    ack_type: 1_i8
+                  )
+                end
+              end
+            end
+          end
+          sleep 100.milliseconds if resp.topics.all? { |t| t.partitions.all? &.records.empty? }
+        rescue ex
+          Log.warn { "Share Group fetch/ack error: #{ex.message}" }
+          sleep 1.second
+        end
+      end
+    ensure
+      client.try(&.close)
+    end
+
     def each(&block : Protocol::Record ->)
       if @config.bootstrap_servers.empty?
         raise "No bootstrap servers configured"
@@ -178,6 +233,7 @@ module Kafkaesque
           oauth_token_provider: @config.oauth_token_provider,
           max_retries: max_retries
         )
+        client.client_rack = @config.client_rack
         @client = client
 
         @assigned_partitions = assignments.map(&.partition).uniq
@@ -403,6 +459,7 @@ module Kafkaesque
             oauth_token_provider: @config.oauth_token_provider,
             max_retries: max_retries
           )
+          coord_client.client_rack = @config.client_rack
           coord_client.connect
           return coord_client
         elsif coord_resp.error_code == 15 && attempts < 5

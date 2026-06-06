@@ -8,6 +8,9 @@ require "./kafkaesque/protocol/produce_fetch"
 require "./kafkaesque/protocol/compression"
 require "./kafkaesque/protocol/group_coordinator"
 require "./kafkaesque/protocol/init_producer_id"
+require "./kafkaesque/protocol/api_versions"
+require "./kafkaesque/protocol/share_groups"
+require "./kafkaesque/protocol/telemetry"
 require "./kafkaesque/protocol/transactions"
 require "./kafkaesque/connection"
 require "./kafkaesque/client"
@@ -21,6 +24,6 @@ require "http/client"
 require "uri"
 
 module Kafkaesque
-  VERSION = "0.3.6"
+  VERSION = "2.0.0"
   Log     = ::Log.for("kafkaesque")
 end

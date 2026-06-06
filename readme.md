@@ -450,7 +450,7 @@ Kafkaesque implements a native Crystal serialization engine that directly commun
 | API Key | API Name | Protocol Version | Features / Implementation Notes |
 | :---: | :--- | :---: | :--- |
 | **0** | `Produce` | `v7` | Supports message headers, record batching, idempotence metadata (`producer_id`, `producer_epoch`), and transactional envelopes. |
-| **1** | `Fetch` | `v4` | Downloads record batches with key/value extraction and header parsing. |
+| **1** | `Fetch` | `v4` | Downloads record batches with key/value extraction and header parsing (routes reads to closest replica under KIP-392). |
 | **2** | `ListOffsets` | `v1` | Retrieves logical partition boundary offsets (earliest/latest). |
 | **3** | `Metadata` | `v2` | Resolves topic-partition topology and maps partition leader hosts. |
 | **8** | `OffsetCommit` | `v2` | Commits individual partition consumer group offsets to coordinator brokers. |
@@ -459,17 +459,25 @@ Kafkaesque implements a native Crystal serialization engine that directly commun
 | **11** | `JoinGroup` | `v0` | Used during legacy consumer group join. |
 | **14** | `Heartbeat` | `v1` | Keeps legacy consumer dynamic membership heartbeat active. |
 | **17** | `SaslHandshake` | `v1` | Initiates authentication protocols. |
+| **18** | `ApiVersions` | `v3` | **KIP-511 Client Telemetry**: Advertises client software name & version to the broker. |
 | **36** | `SaslAuthenticate` | `v1` | Passes dynamic tokens (Plain or OAuthBearer OIDC access tokens) to the broker. |
 | **22** | `InitProducerId` | `v0` | Fetches a transactional producer ID and current epoch. |
 | **24** | `AddPartitionsToTxn` | `v0` | Registers partitions inside an active transactional transaction context. |
 | **26** | `EndTxn` | `v0` | Atomically commits or aborts a multi-partition transaction scope. |
+| **78** | `ShareFetch` | `v0` | **KIP-932 Share Groups**: Pulls queue-based messages from share groups. |
+| **79** | `ShareAcknowledge` | `v0` | **KIP-932 Share Groups**: Acknowledges individual processed queue messages. |
 | **84** | `ConsumerGroupHeartbeat`| `v1` | **KIP-848 Next-Gen Consumer Group Coordination**: Implements server-side partition assignments, rolling memberships, and dynamic balance loops. |
+| **85** | `ShareGroupHeartbeat`| `v0` | **KIP-932 Share Groups**: Heartbeat for share group consumer membership. |
+| **86** | `TelemetrySubscription`| `v0` | **KIP-714 Client Telemetry**: Retrieves active metrics subscriptions from the broker. |
+| **87** | `PushTelemetry` | `v0` | **KIP-714 Client Telemetry**: Pushes collected client performance metrics to the broker. |
 
 ### Features Summary
-1. **Next-Generation Consumer Protocol**: Out-of-the-box support for **KIP-848** (Consumer Group Heartbeat v1) to minimize client-side rebalance complexities and connection storms.
-2. **Exactly-Once Semantics (EOS)**: Support for transactional writes and idempotent producers.
-3. **Container-Oriented Design**: Fully configurable through declarative YAML files and container environment variables.
-4. **Native Authentication**: Support for SASL Plaintext and dynamic OAuthBearer/OIDC (Keycloak, Okta, etc.) credential fetching under-the-hood.
+1. **Next-Generation Protocols**: Out-of-the-box support for **KIP-848** (Consumer Group Heartbeat v1) and **KIP-932** (Share Groups) for dynamic queue consumption.
+2. **Topology-Aware Routing**: Out-of-the-box support for **KIP-392** (Closest Replica follower reading) based on rack configurations.
+3. **Enterprise Telemetry & Diagnostics**: Implements **KIP-511** (Client Software advertising) and **KIP-714** (Broker-side Telemetry metrics push).
+4. **Exactly-Once Semantics (EOS)**: Support for transactional writes and idempotent producers.
+5. **Container-Oriented Design**: Fully configurable through declarative YAML files and container environment variables.
+6. **Native Authentication**: Support for SASL Plaintext and dynamic OAuthBearer/OIDC (Keycloak, Okta, etc.) credential fetching under-the-hood.
 
 ---
 

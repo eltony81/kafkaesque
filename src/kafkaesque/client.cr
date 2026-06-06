@@ -36,8 +36,11 @@ module Kafkaesque
     @correlation_id : Int32 = 0
     @heartbeat_fiber_running = false
     property oauth_token_provider : (-> String)? = nil
+    property client_rack : String? = nil
+    getter api_versions : Array(Protocol::ApiVersionInfo) = [] of Protocol::ApiVersionInfo
     @broker_connections = {} of Int32 => Connection
     @partition_leaders = {} of String => Int32
+    @partition_replicas = {} of String => Array(Int32)
     @brokers = {} of Int32 => Protocol::Broker
     @stats_callbacks = [] of (String -> Void)
     getter produced_messages_count : Int64 = 0_i64
@@ -59,6 +62,12 @@ module Kafkaesque
     def connect
       conn = Connection.new(@host, @port, @use_ssl, @ssl_context)
       @connection = conn
+
+      begin
+        query_api_versions
+      rescue ex
+        Log.debug { "ApiVersions query failed: #{ex.message}. Continuing connection..." }
+      end
 
       token = @oauth_token_provider.try(&.call) || @sasl_token
       if token
@@ -219,6 +228,7 @@ module Kafkaesque
         meta.topics.each do |t|
           t.partitions.each do |p|
             @partition_leaders["#{t.name}:#{p.partition_index}"] = p.leader_id
+            @partition_replicas["#{t.name}:#{p.partition_index}"] = p.replica_nodes
           end
         end
       rescue ex
@@ -306,6 +316,186 @@ module Kafkaesque
       @broker_connections.clear
       @connection.try(&.close)
       @connection = nil
+    end
+
+    def query_api_versions : Protocol::ApiVersionsResponse
+      conn = @connection || raise "Client is not connected. Call #connect first."
+
+      req = Protocol::ApiVersionsRequest.new("kafkaesque", Kafkaesque::VERSION)
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::ApiVersionsRequest::API_KEY,
+        api_version: Protocol::ApiVersionsRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: true
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
+      resp = Protocol::ApiVersionsResponse.deserialize(response_dec)
+
+      if resp.error_code != 0
+        raise "ApiVersions failed with error code: #{resp.error_code}"
+      end
+
+      @api_versions = resp.api_keys
+      resp
+    end
+
+    def closest_replica_connection_for_partition(topic : String, partition : Int32) : Connection
+      slot = "#{topic}:#{partition}"
+      if rack = @client_rack
+        replicas = @partition_replicas[slot]? || begin
+          refresh_partition_metadata(topic, slot)
+          @partition_replicas[slot]?
+        end
+
+        if replicas
+          replicas.each do |node_id|
+            if broker = @brokers[node_id]?
+              if broker.rack == rack
+                return get_or_establish_broker_connection(node_id, broker)
+              end
+            end
+          end
+        end
+      end
+
+      connection_for_partition(topic, partition)
+    end
+
+    def share_fetch(group_id : String, member_id : String, topic : String, partition : Int32, max_bytes : Int32 = 1048576) : Protocol::ShareFetchResponse
+      conn = @connection || raise "Client is not connected. Call #connect first."
+
+      p_req = Protocol::ShareFetchPartition.new(partition, max_bytes)
+      t_req = Protocol::ShareFetchTopic.new(topic, [p_req])
+      req = Protocol::ShareFetchRequest.new(group_id, member_id, [t_req], max_bytes)
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::ShareFetchRequest::API_KEY,
+        api_version: Protocol::ShareFetchRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: true
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
+      Protocol::ShareFetchResponse.deserialize(response_dec)
+    end
+
+    def share_acknowledge(group_id : String, member_id : String, topic : String, partition : Int32, first_offset : Int64, last_offset : Int64, ack_type : Int8) : Protocol::ShareAcknowledgeResponse
+      conn = @connection || raise "Client is not connected. Call #connect first."
+
+      ack_info = Protocol::ShareAckInfo.new(first_offset, last_offset, ack_type)
+      ack_part = Protocol::ShareAckPartition.new(partition, [ack_info])
+      ack_topic = Protocol::ShareAckTopic.new(topic, [ack_part])
+      req = Protocol::ShareAcknowledgeRequest.new(group_id, member_id, [ack_topic])
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::ShareAcknowledgeRequest::API_KEY,
+        api_version: Protocol::ShareAcknowledgeRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: true
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
+      Protocol::ShareAcknowledgeResponse.deserialize(response_dec)
+    end
+
+    def get_telemetry_subscription(client_instance_id : Bytes = Bytes.new(16)) : Protocol::GetTelemetrySubscriptionsResponse
+      conn = @connection || raise "Client is not connected. Call #connect first."
+
+      req = Protocol::GetTelemetrySubscriptionsRequest.new(client_instance_id)
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::GetTelemetrySubscriptionsRequest::API_KEY,
+        api_version: Protocol::GetTelemetrySubscriptionsRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: true
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
+      Protocol::GetTelemetrySubscriptionsResponse.deserialize(response_dec)
+    end
+
+    def push_client_telemetry(subscription_id : Int32, client_instance_id : Bytes, metrics_data : Bytes, terminating : Bool = false, compression_type : Int8 = 0) : Protocol::PushTelemetryResponse
+      conn = @connection || raise "Client is not connected. Call #connect first."
+
+      req = Protocol::PushTelemetryRequest.new(
+        client_instance_id: client_instance_id,
+        subscription_id: subscription_id,
+        terminating: terminating,
+        compression_type: compression_type,
+        metrics: metrics_data
+      )
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::PushTelemetryRequest::API_KEY,
+        api_version: Protocol::PushTelemetryRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: true
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
+      Protocol::PushTelemetryResponse.deserialize(response_dec)
     end
 
     private def next_correlation_id : Int32

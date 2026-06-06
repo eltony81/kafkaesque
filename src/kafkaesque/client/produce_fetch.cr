@@ -276,7 +276,7 @@ module Kafkaesque
       retries = @max_retries
       while retries > 0
         begin
-          conn = connection_for_partition(topic, partition)
+          conn = closest_replica_connection_for_partition(topic, partition)
 
           req_io = Protocol::BUFFER_POOL.rent
           req_io.clear
