@@ -540,6 +540,33 @@ if sub_resp.error_code == 0
 end
 ```
 
+#### 4. SASL SCRAM & Mutual TLS (mTLS)
+
+Configure enterprise-grade security using SASL SCRAM-SHA-256/512 and client TLS credentials:
+```crystal
+# Define your settings
+settings = {
+  "security.protocol"           => "SASL_SSL",
+  "sasl.mechanism"             => "SCRAM-SHA-256", # Or "SCRAM-SHA-512"
+  "sasl.username"              => "my-scram-user",
+  "sasl.password"              => "my-scram-password",
+  "ssl.truststore.location"     => "/path/to/ca.pem",
+  "ssl.keystore.location"       => "/path/to/client.crt",
+  "ssl.keystore.key.location"   => "/path/to/client.key",
+}
+
+client = Kafkaesque::Client.connect_first(
+  servers: ["localhost:9093"],
+  settings: settings
+)
+```
+
+#### 5. Exponential Backoff with Jitter & Failover
+
+Out-of-the-box resilience is built directly into connection loops and socket requests:
+- **Exponential Backoff with Full Jitter**: Connection retries dynamically scale sleep durations using a randomized full jitter calculation to protect against thundering herd conditions.
+- **Failover Routing**: When connection socket errors are encountered, the client automatically triggers a partition metadata re-resolution from backup bootstrap brokers and routes traffic to the new leader or local replica.
+
 ---
 
 ## Performance & Optimizations
