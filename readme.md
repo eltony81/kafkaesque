@@ -481,6 +481,64 @@ Kafkaesque implements a native Crystal serialization engine that directly commun
 4. **Exactly-Once Semantics (EOS)**: Support for transactional writes and idempotent producers.
 5. **Container-Oriented Design**: Fully configurable through declarative YAML files and container environment variables.
 6. **Native Authentication**: Support for SASL Plaintext and dynamic OAuthBearer/OIDC (Keycloak, Okta, etc.) credential fetching under-the-hood.
+### KIP Features Code Snippets
+
+#### 1. Closest Replica Routing (KIP-392)
+Enable follower replica reads by declaring the client's current zone/rack ID:
+```crystal
+config = Kafkaesque::Consumer::Config.new(
+  bootstrap_servers: ["localhost:9097"],
+  group_id: "my-closest-replica-group"
+)
+consumer = Kafkaesque::Consumer.new(config)
+
+# Set the client's rack location; fetches will automatically route
+# to matching follower replicas, falling back to the leader if none match.
+consumer.client.client_rack = "rack-a"
+
+consumer.each do |record|
+  puts "Received record: #{String.new(record.value)}"
+end
+```
+
+#### 2. Share Groups (KIP-932)
+Consume queue-based messages concurrently from share groups using individual message acknowledgments (bypassing traditional partition offsets):
+```crystal
+config = Kafkaesque::Consumer::Config.new(
+  bootstrap_servers: ["localhost:9097"],
+  group_id: "my-share-group"
+)
+consumer = Kafkaesque::Consumer.new(config)
+
+# Consume from a share group topic; individual messages are 
+# automatically acknowledged on successful block completion.
+consumer.share_each(topic: "my-topic") do |record|
+  puts "Processed queue message: #{String.new(record.value)}"
+end
+```
+
+#### 3. Client Telemetry (KIP-714)
+Fetch metrics subscriptions and push client performance diagnostics to the cluster metrics receiver:
+```crystal
+client = Kafkaesque::Client.connect_first(
+  servers: ["localhost:9097"],
+  client_id: "my-telemetry-client"
+)
+
+# Discover what metrics the broker is requesting and obtain a client instance ID
+sub_resp = client.get_telemetry_subscription
+
+if sub_resp.error_code == 0
+  puts "Telemetry subscription active. ID: #{sub_resp.subscription_id}"
+  
+  # Push OTLP metric payloads to the broker
+  client.push_client_telemetry(
+    subscription_id: sub_resp.subscription_id,
+    client_instance_id: sub_resp.client_instance_id,
+    metrics_data: "my_otlp_metrics_payload".to_slice
+  )
+end
+```
 
 ---
 
