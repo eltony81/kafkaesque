@@ -1,5 +1,8 @@
 # Kafkaesque
 
+> [!WARNING]
+> This Kafka library was created specifically for high performance to support applications built with the [cryspace](https://github.com/eltony81/cryspace) library. It is **NOT** intended to be used in production environments or for other general-purpose goals.
+
 Kafkaesque is a modern, dependency-light Crystal client library for Apache Kafka. It includes support for KIP-848 consumer group protocols, transactional delivery, and pluggable OAuthBearer (OIDC) token authentication out-of-the-box.
 
 ---
