@@ -102,7 +102,8 @@ module Kafkaesque
         sasl_token: sasl_token,
         client_id: @config.settings["client.id"]? || "kafkaesque-producer",
         oauth_token_provider: @config.oauth_token_provider,
-        max_retries: max_retries
+        max_retries: max_retries,
+        settings: @config.settings
       )
 
       # Configure batch accumulator options from settings

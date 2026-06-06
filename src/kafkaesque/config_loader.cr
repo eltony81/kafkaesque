@@ -114,9 +114,10 @@ module Kafkaesque
           # KAFKA_SETTING_ENABLE_IDEMPOTENCE -> "enable.idempotence"
           setting_key = key.sub("KAFKA_SETTING_", "").downcase.gsub('_', '.')
           settings_hash[YAML::Any.new(setting_key)] = YAML::Any.new(value)
-        elsif key.starts_with?("KAFKA_SASL_")
-          # Special mapping for OIDC endpoints/credentials
+        elsif key.starts_with?("KAFKA_SASL_") || key.starts_with?("KAFKA_SSL_")
+          # Special mapping for OIDC endpoints/credentials and SSL paths
           # KAFKA_SASL_OAUTHBEARER_TOKEN_ENDPOINT_URL -> "sasl.oauthbearer.token.endpoint.url"
+          # KAFKA_SSL_KEYSTORE_LOCATION -> "ssl.keystore.location"
           setting_key = key.sub("KAFKA_", "").downcase.gsub('_', '.')
           settings_hash[YAML::Any.new(setting_key)] = YAML::Any.new(value)
         end

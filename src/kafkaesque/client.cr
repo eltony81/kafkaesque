@@ -46,17 +46,38 @@ module Kafkaesque
     getter produced_messages_count : Int64 = 0_i64
     getter produced_bytes_count : Int64 = 0_i64
     getter consumed_messages_count : Int64 = 0_i64
+    property settings : Hash(String, String)?
 
     def initialize(
       @host : String,
       @port : Int32,
-      @use_ssl : Bool = false,
+      use_ssl : Bool = false,
       @sasl_token : String? = nil,
       @client_id = "kafkaesque-crystal",
-      @ssl_context : OpenSSL::SSL::Context::Client? = nil,
+      ssl_context : OpenSSL::SSL::Context::Client? = nil,
       @oauth_token_provider : (-> String)? = nil,
       @max_retries : Int32 = 3,
+      @settings : Hash(String, String)? = nil,
     )
+      @use_ssl = use_ssl || (settings.try(&.[]?("security.protocol")) == "SSL" || settings.try(&.[]?("security.protocol")) == "SASL_SSL")
+      @ssl_context = ssl_context
+      if @use_ssl && @ssl_context.nil? && settings
+        @ssl_context = Client.build_ssl_context(settings)
+      end
+    end
+
+    def self.build_ssl_context(settings : Hash(String, String)) : OpenSSL::SSL::Context::Client
+      ctx = OpenSSL::SSL::Context::Client.new
+      if ca_file = settings["ssl.truststore.location"]?
+        ctx.ca_certificates = ca_file
+      end
+
+      if cert_file = settings["ssl.keystore.location"]?
+        key_file = settings["ssl.keystore.key.location"]? || cert_file
+        ctx.certificate_chain = cert_file
+        ctx.private_key = key_file
+      end
+      ctx
     end
 
     def connect
@@ -69,9 +90,118 @@ module Kafkaesque
         Log.debug { "ApiVersions query failed: #{ex.message}. Continuing connection..." }
       end
 
-      token = @oauth_token_provider.try(&.call) || @sasl_token
-      if token
-        authenticate_sasl(conn, token)
+      mechanism = @settings.try(&.[]?("sasl.mechanism")).try(&.upcase) || "OAUTHBEARER"
+
+      if mechanism == "OAUTHBEARER"
+        token = @oauth_token_provider.try(&.call) || @sasl_token || @settings.try(&.[]?("sasl.password")) || @settings.try(&.[]?("sasl.oauthbearer.token"))
+        if token
+          authenticate_sasl(conn, token)
+        end
+      elsif mechanism == "SCRAM-SHA-256" || mechanism == "SCRAM-SHA-512"
+        username = @settings.try(&.[]?("sasl.scram.username")) || @settings.try(&.[]?("sasl.username")) || ""
+        password = @settings.try(&.[]?("sasl.scram.password")) || @settings.try(&.[]?("sasl.password")) || ""
+        authenticate_scram(conn, username, password, mechanism)
+      end
+    end
+
+    private def authenticate_scram(conn : Connection, username : String, password : String, mechanism : String)
+      algo = mechanism == "SCRAM-SHA-256" ? :sha256 : :sha512
+      authenticator = Protocol::ScramAuthenticator.new(username, password, algo)
+
+      # 1. Send SaslHandshakeRequest specifying the mechanism
+      handshake_req = Protocol::SaslHandshakeRequest.new(mechanism)
+      handshake_io = IO::Memory.new
+      handshake_enc = Protocol::Encoder.new(handshake_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::SaslHandshakeRequest::API_KEY,
+        api_version: Protocol::SaslHandshakeRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id
+      )
+
+      req_header.serialize(handshake_enc)
+      handshake_req.serialize(handshake_enc)
+
+      conn.send_request(handshake_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
+      handshake_resp = Protocol::SaslHandshakeResponse.deserialize(response_dec)
+
+      if handshake_resp.error_code != 0
+        raise "SASL Handshake failed for #{mechanism} with error code: #{handshake_resp.error_code}"
+      end
+
+      # 2. Client First Message -> SaslAuthenticateRequest
+      client_first = authenticator.client_first_message
+      auth_req_1 = Protocol::SaslAuthenticateRequest.new(client_first.to_slice)
+
+      auth_io_1 = IO::Memory.new
+      auth_enc_1 = Protocol::Encoder.new(auth_io_1)
+
+      auth_header_1 = Protocol::RequestHeader.new(
+        api_key: Protocol::SaslAuthenticateRequest::API_KEY,
+        api_version: Protocol::SaslAuthenticateRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id
+      )
+
+      auth_header_1.serialize(auth_enc_1)
+      auth_req_1.serialize(auth_enc_1)
+
+      conn.send_request(auth_io_1.to_slice)
+
+      auth_resp_io_1 = conn.read_response
+      auth_resp_dec_1 = Protocol::Decoder.new(auth_resp_io_1)
+
+      Protocol::ResponseHeader.deserialize(auth_resp_dec_1, flexible: false)
+      auth_resp_1 = Protocol::SaslAuthenticateResponse.deserialize(auth_resp_dec_1)
+
+      if auth_resp_1.error_code != 0
+        raise "SCRAM Client First authenticate failed: #{auth_resp_1.error_message} (code: #{auth_resp_1.error_code})"
+      end
+
+      server_first_bytes = auth_resp_1.auth_bytes || raise "Server first message is empty"
+      server_first = String.new(server_first_bytes)
+
+      # 3. Client Final Message
+      client_final, expected_server_signature = authenticator.process_server_first_message(server_first)
+
+      auth_req_2 = Protocol::SaslAuthenticateRequest.new(client_final.to_slice)
+      auth_io_2 = IO::Memory.new
+      auth_enc_2 = Protocol::Encoder.new(auth_io_2)
+
+      auth_header_2 = Protocol::RequestHeader.new(
+        api_key: Protocol::SaslAuthenticateRequest::API_KEY,
+        api_version: Protocol::SaslAuthenticateRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id
+      )
+
+      auth_header_2.serialize(auth_enc_2)
+      auth_req_2.serialize(auth_enc_2)
+
+      conn.send_request(auth_io_2.to_slice)
+
+      auth_resp_io_2 = conn.read_response
+      auth_resp_dec_2 = Protocol::Decoder.new(auth_resp_io_2)
+
+      Protocol::ResponseHeader.deserialize(auth_resp_dec_2, flexible: false)
+      auth_resp_2 = Protocol::SaslAuthenticateResponse.deserialize(auth_resp_dec_2)
+
+      if auth_resp_2.error_code != 0
+        raise "SCRAM Client Final authenticate failed: #{auth_resp_2.error_message} (code: #{auth_resp_2.error_code})"
+      end
+
+      server_final_bytes = auth_resp_2.auth_bytes || raise "Server final message is empty"
+      server_final = String.new(server_final_bytes)
+
+      # 4. Verify Server Signature
+      unless authenticator.verify_server_final_message(server_final, expected_server_signature)
+        raise "Server signature verification failed in SCRAM authentication"
       end
     end
 
@@ -237,16 +367,44 @@ module Kafkaesque
       @partition_leaders[slot]?
     end
 
+    private def authenticate_connection(conn : Connection)
+      mechanism = @settings.try(&.[]?("sasl.mechanism")).try(&.upcase) || "OAUTHBEARER"
+
+      if mechanism == "OAUTHBEARER"
+        token = @oauth_token_provider.try(&.call) || @sasl_token || @settings.try(&.[]?("sasl.password")) || @settings.try(&.[]?("sasl.oauthbearer.token"))
+        if token
+          authenticate_sasl(conn, token)
+        end
+      elsif mechanism == "SCRAM-SHA-256" || mechanism == "SCRAM-SHA-512"
+        username = @settings.try(&.[]?("sasl.scram.username")) || @settings.try(&.[]?("sasl.username")) || ""
+        password = @settings.try(&.[]?("sasl.scram.password")) || @settings.try(&.[]?("sasl.password")) || ""
+        authenticate_scram(conn, username, password, mechanism)
+      end
+    end
+
     private def get_or_establish_broker_connection(node_id : Int32, broker : Protocol::Broker) : Connection
       conn = @broker_connections[node_id]?
       if conn.nil? || conn.closed?
-        conn = Connection.new(broker.host, broker.port, @use_ssl, @ssl_context)
-        @broker_connections[node_id] = conn
-        if token = @oauth_token_provider.try(&.call) || @sasl_token
-          authenticate_sasl(conn, token)
+        backoff = Backoff.new(base: 100.0, max: 10000.0)
+        attempts = 0
+        loop do
+          begin
+            conn = Connection.new(broker.host, broker.port, @use_ssl, @ssl_context)
+            @broker_connections[node_id] = conn
+            authenticate_connection(conn)
+            break
+          rescue ex
+            attempts += 1
+            if attempts > @max_retries
+              raise ex
+            end
+            sleep_ms = backoff.compute(attempts)
+            Log.debug { "Failed to establish connection to broker #{node_id} (#{broker.host}:#{broker.port}). Retrying in #{sleep_ms.round(2)}ms..." }
+            sleep sleep_ms.milliseconds
+          end
         end
       end
-      conn
+      conn.not_nil!
     end
 
     def on_stats(&block : String -> Void)
@@ -276,30 +434,50 @@ module Kafkaesque
       use_ssl : Bool = false,
       ssl_context : OpenSSL::SSL::Context::Client? = nil,
       max_retries : Int32 = 3,
+      settings : Hash(String, String)? = nil,
     ) : Client
       last_err = nil
-      servers.each do |server|
-        parts = server.split(":")
-        host = parts[0]
-        port = parts.size > 1 ? parts[1].to_i : 9092
-        begin
-          client = Client.new(
-            host: host,
-            port: port,
-            use_ssl: use_ssl,
-            sasl_token: sasl_token,
-            client_id: client_id,
-            ssl_context: ssl_context,
-            oauth_token_provider: oauth_token_provider,
-            max_retries: max_retries
-          )
-          client.connect
-          return client
-        rescue ex
-          last_err = ex
-          Log.debug { "Failed to connect to bootstrap server #{server}: #{ex.message}" }
+      backoff = Backoff.new(base: 100.0, max: 10000.0)
+
+      (max_retries + 1).times do |attempt|
+        servers.each do |server|
+          parts = server.split(":")
+          host = parts[0]
+          port = parts.size > 1 ? parts[1].to_i : 9092
+
+          actual_ssl = use_ssl || (settings.try(&.[]?("security.protocol")) == "SSL" || settings.try(&.[]?("security.protocol")) == "SASL_SSL")
+          actual_ctx = ssl_context
+          if actual_ssl && actual_ctx.nil? && settings
+            actual_ctx = build_ssl_context(settings)
+          end
+
+          begin
+            client = Client.new(
+              host: host,
+              port: port,
+              use_ssl: actual_ssl,
+              sasl_token: sasl_token,
+              client_id: client_id,
+              ssl_context: actual_ctx,
+              oauth_token_provider: oauth_token_provider,
+              max_retries: max_retries,
+              settings: settings
+            )
+            client.connect
+            return client
+          rescue ex
+            last_err = ex
+            Log.debug { "Failed to connect to bootstrap server #{server}: #{ex.message}" }
+          end
+        end
+
+        if attempt < max_retries
+          sleep_ms = backoff.compute(attempt)
+          Log.debug { "All connection attempts failed. Retrying in #{sleep_ms.round(2)}ms..." }
+          sleep sleep_ms.milliseconds
         end
       end
+
       raise last_err || Exception.new("No bootstrap servers configured")
     end
 

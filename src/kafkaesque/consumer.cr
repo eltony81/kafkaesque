@@ -170,7 +170,8 @@ module Kafkaesque
         sasl_token: @config.sasl_token,
         client_id: @config.settings["client.id"]? || "kafkaesque-share-consumer",
         oauth_token_provider: @config.oauth_token_provider,
-        max_retries: max_retries
+        max_retries: max_retries,
+        settings: @config.settings
       )
       client.client_rack = @config.client_rack
       @client = client
@@ -231,7 +232,8 @@ module Kafkaesque
           sasl_token: @config.sasl_token,
           client_id: @config.settings["client.id"]? || "kafkaesque-consumer-manual",
           oauth_token_provider: @config.oauth_token_provider,
-          max_retries: max_retries
+          max_retries: max_retries,
+          settings: @config.settings
         )
         client.client_rack = @config.client_rack
         @client = client
@@ -444,7 +446,8 @@ module Kafkaesque
           sasl_token: @config.sasl_token,
           client_id: "kafkaesque-consumer-bootstrap",
           oauth_token_provider: @config.oauth_token_provider,
-          max_retries: max_retries
+          max_retries: max_retries,
+          settings: @config.settings
         )
 
         coord_resp = bootstrap_client.find_coordinator(group_id)
@@ -457,7 +460,8 @@ module Kafkaesque
             sasl_token: @config.sasl_token,
             client_id: "kafkaesque-consumer",
             oauth_token_provider: @config.oauth_token_provider,
-            max_retries: max_retries
+            max_retries: max_retries,
+            settings: @config.settings
           )
           coord_client.client_rack = @config.client_rack
           coord_client.connect
@@ -690,7 +694,8 @@ module Kafkaesque
         sasl_token: @config.sasl_token,
         client_id: "kafkaesque-consumer-bootstrap",
         oauth_token_provider: @config.oauth_token_provider,
-        max_retries: max_retries
+        max_retries: max_retries,
+        settings: @config.settings
       )
       begin
         meta = bootstrap_client.fetch_metadata(nil)
