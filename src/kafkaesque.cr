@@ -14,6 +14,7 @@ require "./kafkaesque/protocol/telemetry"
 require "./kafkaesque/protocol/transactions"
 require "./kafkaesque/protocol/scram"
 require "./kafkaesque/backoff"
+require "./kafkaesque/partitioner"
 require "./kafkaesque/connection"
 require "./kafkaesque/client"
 require "./kafkaesque/topic_partition"
@@ -26,6 +27,6 @@ require "http/client"
 require "uri"
 
 module Kafkaesque
-  VERSION = "2.1.0"
+  VERSION = "2.2.0"
   Log     = ::Log.for("kafkaesque")
 end

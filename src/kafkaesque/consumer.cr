@@ -117,11 +117,14 @@ module Kafkaesque
       new(cfg)
     end
 
+    @paused_partitions = Set(Tuple(String, Int32)).new
+
     def initialize(@config : Config)
       @partition_offsets = Hash(Tuple(String, Int32), Int64).new
       @offset_mutex = Mutex.new
       @prefetch_channel = Channel(Array(Protocol::Record)).new(100)
       @active_fetchers = Hash(Tuple(String, Int32), Bool).new
+      @paused_partitions = Set(Tuple(String, Int32)).new
     end
 
     def on_partitions_assigned(&block : Array(Int32) -> Void)
@@ -157,6 +160,51 @@ module Kafkaesque
 
     def assign(topic_partition : TopicPartition)
       assign([topic_partition])
+    end
+
+    def pause(topic : String, partition : Int32)
+      @paused_partitions.add({topic, partition})
+      Log.debug { "Paused fetching for partition #{topic}:#{partition}" }
+    end
+
+    def pause(topic_partitions : Array(TopicPartition))
+      topic_partitions.each { |tp| pause(tp.topic, tp.partition) }
+    end
+
+    def resume(topic : String, partition : Int32)
+      @paused_partitions.delete({topic, partition})
+      Log.debug { "Resumed fetching for partition #{topic}:#{partition}" }
+    end
+
+    def resume(topic_partitions : Array(TopicPartition))
+      topic_partitions.each { |tp| resume(tp.topic, tp.partition) }
+    end
+
+    def paused?(topic : String, partition : Int32) : Bool
+      @paused_partitions.includes?({topic, partition})
+    end
+
+    def commit(offsets : Hash(TopicPartition, Int64))
+      coord = @coordinator_client || @client || raise "Consumer is not currently connected to any coordinator or broker"
+      group_id = @config.settings["group.id"]? || "default-group"
+      offsets.each do |tp, offset|
+        coord.offset_commit(
+          group_id: group_id,
+          generation_id: @member_epoch,
+          member_id: @member_id,
+          topic: tp.topic,
+          partition: tp.partition,
+          offset: offset
+        )
+      end
+    end
+
+    def commit_async(offsets : Hash(TopicPartition, Int64))
+      spawn do
+        commit(offsets)
+      rescue ex
+        Log.error(exception: ex) { "Async manual offset commit failed" }
+      end
     end
 
     def share_each(&block : Protocol::Record ->)
@@ -321,6 +369,7 @@ module Kafkaesque
           @hb_mutex.synchronize do
             begin
               owned_tp = [] of Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions
+              assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
               r = coord_client.consumer_group_heartbeat(
                 group_id: group_id,
                 member_id: @member_id,
@@ -328,7 +377,7 @@ module Kafkaesque
                 instance_id: instance_id,
                 rebalance_timeout_ms: session_timeout,
                 subscribed_topic_names: @topics,
-                server_assignor: "uniform",
+                server_assignor: assignor,
                 topic_partitions: owned_tp
               )
               if r.error_code == 0
@@ -477,6 +526,7 @@ module Kafkaesque
     end
 
     private def join_consumer_group(coord_client : Client, group_id : String, instance_id : String?, session_timeout : Int32) : Int32
+      assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
       hb_resp = coord_client.consumer_group_heartbeat(
         group_id: group_id,
         member_id: @member_id,
@@ -484,7 +534,7 @@ module Kafkaesque
         instance_id: instance_id,
         rebalance_timeout_ms: session_timeout,
         subscribed_topic_names: @topics,
-        server_assignor: "uniform"
+        server_assignor: assignor
       )
 
       if hb_resp.error_code != 0
@@ -577,6 +627,11 @@ module Kafkaesque
         fetch_min_bytes = (@config.settings["fetch.min.bytes"]? || "1").to_i
 
         while @running && @active_fetchers[{topic, partition}]?
+          if paused?(topic, partition)
+            sleep 100.milliseconds
+            next
+          end
+
           begin
             poll_resp = client.fetch(topic, partition: partition, fetch_offset: current_offset, min_bytes: fetch_min_bytes)
             if poll_resp.error_code == 0
@@ -638,6 +693,7 @@ module Kafkaesque
               instance_id = @config.settings["group.instance.id"]?
               session_timeout = (@config.settings["session.timeout.ms"]? || "30000").to_i
 
+              assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
               r = client.consumer_group_heartbeat(
                 group_id: group_id,
                 member_id: @member_id,
@@ -645,7 +701,7 @@ module Kafkaesque
                 instance_id: instance_id,
                 rebalance_timeout_ms: session_timeout,
                 subscribed_topic_names: @topics,
-                server_assignor: "uniform",
+                server_assignor: assignor,
                 topic_partitions: owned_tp
               )
 

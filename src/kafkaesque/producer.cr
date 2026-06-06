@@ -5,8 +5,14 @@ module Kafkaesque
       property settings : Hash(String, String)
       property oauth_token_provider : (-> String)? = nil
       property compression_type : String? = nil
+      property partitioner : Partitioner::Base
 
-      def initialize(bootstrap_servers : Array(String) = ["localhost:9092"], compression_type : String? = nil, settings = {} of String => String)
+      def initialize(
+        bootstrap_servers : Array(String) = ["localhost:9092"],
+        compression_type : String? = nil,
+        settings = {} of String => String,
+        @partitioner : Partitioner::Base = Partitioner::MurmurHash2.new,
+      )
         @bootstrap_servers = bootstrap_servers
         @compression_type = compression_type
         @settings = settings
@@ -219,13 +225,36 @@ module Kafkaesque
       end
     end
 
-    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Array(Protocol::RecordHeader)? = nil, partition : Int32 = 0, timestamp : Time? = nil)
+    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Array(Protocol::RecordHeader)? = nil, partition : Int32? = nil, timestamp : Time? = nil)
       client = @client || raise "Producer is closed"
 
+      actual_partition = if partition
+                           partition
+                         else
+                           key_bytes = case key
+                                       when String
+                                         key.to_slice
+                                       when Bytes
+                                         key
+                                       else
+                                         nil
+                                       end
+                           val_bytes = case payload
+                                       when String
+                                         payload.to_slice
+                                       when Bytes
+                                         payload
+                                       else
+                                         Bytes.empty
+                                       end
+                           parts_count = client.partitions_count(topic)
+                           @config.partitioner.partition(topic, key_bytes, val_bytes, parts_count)
+                         end
+
       if @in_transaction && (tx_id = @transactional_id)
-        slot = "#{topic}:#{partition}"
+        slot = "#{topic}:#{actual_partition}"
         unless @txn_partitions.includes?(slot)
-          client.add_partitions_to_txn(tx_id, client.producer_id, client.producer_epoch, {topic => [partition]})
+          client.add_partitions_to_txn(tx_id, client.producer_id, client.producer_epoch, {topic => [actual_partition]})
           @txn_partitions.add(slot)
         end
       end
@@ -236,7 +265,7 @@ module Kafkaesque
       attempts = 0
       loop do
         begin
-          client.batch_produce(topic, key, payload, partition: partition, headers: headers || [] of Protocol::RecordHeader, timestamp: timestamp)
+          client.batch_produce(topic, key, payload, partition: actual_partition, headers: headers || [] of Protocol::RecordHeader, timestamp: timestamp)
           break
         rescue ex
           attempts += 1
@@ -248,7 +277,7 @@ module Kafkaesque
       end
     end
 
-    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Hash(String, String) = {} of String => String, partition : Int32 = 0, timestamp : Time? = nil)
+    def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Hash(String, String) = {} of String => String, partition : Int32? = nil, timestamp : Time? = nil)
       record_headers = nil
       unless headers.empty?
         record_headers = Array(Protocol::RecordHeader).new(headers.size)

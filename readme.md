@@ -567,6 +567,43 @@ Out-of-the-box resilience is built directly into connection loops and socket req
 - **Exponential Backoff with Full Jitter**: Connection retries dynamically scale sleep durations using a randomized full jitter calculation to protect against thundering herd conditions.
 - **Failover Routing**: When connection socket errors are encountered, the client automatically triggers a partition metadata re-resolution from backup bootstrap brokers and routes traffic to the new leader or local replica.
 
+#### 6. Custom Partitioning & MurmurHash2
+
+Configure key-based partitioning using Kafka's standard MurmurHash2 algorithm or implement a custom router:
+```crystal
+# 1. Custom partitioner
+class CustomTenantPartitioner < Kafkaesque::Partitioner::Base
+  def partition(topic : String, key : Bytes?, value : Bytes?, partitions_count : Int32) : Int32
+    # Custom tenant pinning logic
+    0
+  end
+end
+
+# 2. Configure producer
+config = Kafkaesque::Producer::Config.new(
+  bootstrap_servers: ["localhost:9092"],
+  partitioner: CustomTenantPartitioner.new
+)
+```
+
+#### 7. Pause, Resume & Manual Offset Commits
+
+Handle rate limits, backpressure, and manual offset tracking:
+```crystal
+# Pause fetching on a partition
+consumer.pause("device-telemetry", 0)
+
+# Resume fetching
+consumer.resume("device-telemetry", 0)
+
+# Manual offset commits
+offsets = {
+  Kafkaesque::TopicPartition.new("device-telemetry", 0) => 1050_i64
+}
+consumer.commit(offsets)       # Synchronous commit
+consumer.commit_async(offsets) # Asynchronous commit
+```
+
 ---
 
 ## Performance & Optimizations

@@ -8,7 +8,7 @@ module Kafkaesque
     class ScramAuthenticator
       property username : String
       property password : String
-      property algorithm : Symbol # :sha256 or :sha512
+      property algorithm : Symbol # :sha1, :sha256 or :sha512
       property client_nonce : String
 
       def initialize(@username, @password, @algorithm = :sha256)
@@ -46,18 +46,35 @@ module Kafkaesque
         salt = Base64.decode(salt_b64)
 
         # 1. PBKDF2 to compute SaltedPassword
-        ssl_alg = @algorithm == :sha256 ? OpenSSL::Algorithm::SHA256 : OpenSSL::Algorithm::SHA512
-        key_size = @algorithm == :sha256 ? 32 : 64
+        ssl_alg = case @algorithm
+                  when :sha1
+                    OpenSSL::Algorithm::SHA1
+                  when :sha512
+                    OpenSSL::Algorithm::SHA512
+                  else
+                    OpenSSL::Algorithm::SHA256
+                  end
+        key_size = case @algorithm
+                   when :sha1
+                     20
+                   when :sha512
+                     64
+                   else
+                     32
+                   end
         salted_password = OpenSSL::PKCS5.pbkdf2_hmac(@password, salt, iterations, ssl_alg, key_size)
 
         # 2. ClientKey = HMAC(SaltedPassword, "Client Key")
         client_key = OpenSSL::HMAC.digest(ssl_alg, salted_password, "Client Key".to_slice)
 
         # 3. StoredKey = SHA(ClientKey)
-        stored_key = if @algorithm == :sha256
-                       Digest::SHA256.digest(client_key)
-                     else
+        stored_key = case @algorithm
+                     when :sha1
+                       Digest::SHA1.digest(client_key)
+                     when :sha512
                        Digest::SHA512.digest(client_key)
+                     else
+                       Digest::SHA256.digest(client_key)
                      end
 
         # 4. AuthMessage

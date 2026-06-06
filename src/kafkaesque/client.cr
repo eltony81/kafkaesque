@@ -77,6 +77,13 @@ module Kafkaesque
         ctx.certificate_chain = cert_file
         ctx.private_key = key_file
       end
+
+      # Peer verification overrides
+      verify_peer = true
+      if settings["ssl.endpoint.identification.algorithm"]? == "none" || settings["ssl.verify.peer"]? == "false"
+        verify_peer = false
+      end
+      ctx.verify_mode = verify_peer ? OpenSSL::SSL::VerifyMode::PEER : OpenSSL::SSL::VerifyMode::NONE
       ctx
     end
 
@@ -105,7 +112,14 @@ module Kafkaesque
     end
 
     private def authenticate_scram(conn : Connection, username : String, password : String, mechanism : String)
-      algo = mechanism == "SCRAM-SHA-256" ? :sha256 : :sha512
+      algo = case mechanism
+             when "SCRAM-SHA-256"
+               :sha256
+             when "SCRAM-SHA-512"
+               :sha512
+             else
+               :sha1
+             end
       authenticator = Protocol::ScramAuthenticator.new(username, password, algo)
 
       # 1. Send SaslHandshakeRequest specifying the mechanism
@@ -361,10 +375,21 @@ module Kafkaesque
             @partition_replicas["#{t.name}:#{p.partition_index}"] = p.replica_nodes
           end
         end
-      rescue ex
-        # fallback
       end
       @partition_leaders[slot]?
+    end
+
+    def partitions_count(topic : String) : Int32
+      count = @partition_leaders.keys.count { |k| k.starts_with?("#{topic}:") }
+      if count == 0
+        begin
+          fetch_metadata([topic])
+          count = @partition_leaders.keys.count { |k| k.starts_with?("#{topic}:") }
+        rescue ex
+          # fallback
+        end
+      end
+      count > 0 ? count : 1
     end
 
     private def authenticate_connection(conn : Connection)
@@ -375,7 +400,7 @@ module Kafkaesque
         if token
           authenticate_sasl(conn, token)
         end
-      elsif mechanism == "SCRAM-SHA-256" || mechanism == "SCRAM-SHA-512"
+      elsif mechanism == "SCRAM-SHA-256" || mechanism == "SCRAM-SHA-512" || mechanism == "SCRAM-SHA-1"
         username = @settings.try(&.[]?("sasl.scram.username")) || @settings.try(&.[]?("sasl.username")) || ""
         password = @settings.try(&.[]?("sasl.scram.password")) || @settings.try(&.[]?("sasl.password")) || ""
         authenticate_scram(conn, username, password, mechanism)
