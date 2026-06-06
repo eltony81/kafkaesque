@@ -1,4 +1,4 @@
-# This example demonstrates KIP-511 (Client Software Name/Version advertisement) 
+# This example demonstrates KIP-511 (Client Software Name/Version advertisement)
 # and KIP-392 (Closest Replica routing based on rack configuration) in Kafkaesque.
 
 require "../src/kafkaesque"
@@ -23,7 +23,7 @@ consumer = Kafkaesque::Consumer.new(config)
 consumer.subscribe(["telemetry-data"])
 
 # Under the hood, during consumer connection:
-# - KIP-511 runs automatically. The client sends an ApiVersionsRequest v3, 
+# - KIP-511 runs automatically. The client sends an ApiVersionsRequest v3,
 #   identifying itself as "kafkaesque" with its current version.
 # - The broker parses this client software information for cluster operators.
 # - The client caches the broker's supported api key versions.
@@ -32,18 +32,18 @@ consumer.subscribe(["telemetry-data"])
 spawn do
   # Wait for consumer connection loop to start and query versions
   sleep 1.second
-  
+
   if client = consumer.@client
     puts "\n--- [KIP-511] Negotiated Broker API Versions ---"
     client.api_versions.each do |info|
       # E.g. API key 18 (ApiVersions), key 0 (Produce), key 1 (Fetch)
       puts "API Key: #{info.api_key} | Supported Version: v#{info.min_version} to v#{info.max_version}"
     end
-    
+
     # Check current rack routing configuration
     puts "\n--- [KIP-392] Closest Replica Configuration ---"
     puts "Client configured rack location: #{client.client_rack}"
-    
+
     # When fetching, the client will lookup the partition replicas.
     # If any replica resides on a broker with the rack matching "us-east-1a",
     # the client will route read requests to that follower replica instead of the leader!

@@ -71,7 +71,7 @@ module Kafkaesque
             # Default ApiVersions response
             enc = Protocol::Encoder.new(response_body_io)
             enc.write_int16(0_i16) # error_code
-            
+
             # Mock some keys: Produce(0), Fetch(1), ListOffsets(2), Metadata(3), ApiVersions(18)
             keys = [0_i16, 1_i16, 2_i16, 3_i16, 18_i16]
             enc.write_compact_array(keys) do |k|

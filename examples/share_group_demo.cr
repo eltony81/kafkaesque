@@ -12,7 +12,7 @@ config = Kafkaesque::Consumer::Config.new(
   bootstrap_servers: ["localhost:9092"],
   settings: {
     "group.id"   => "my-share-group", # Share group identifier
-    "group.type" => "share"          # Type configured as a share group
+    "group.type" => "share",          # Type configured as a share group
   }
 )
 
@@ -26,7 +26,7 @@ puts "Starting Share Group consumer... Press Ctrl+C to stop."
 begin
   consumer.share_each do |message|
     puts "Processing message: #{message.value} (Offset: #{message.offset})"
-    # Under the hood, share_each automatically calls `share_acknowledge` 
+    # Under the hood, share_each automatically calls `share_acknowledge`
     # for each message processed, marking it as successfully handled in the queue.
   end
 ensure

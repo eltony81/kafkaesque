@@ -13,7 +13,7 @@ config = Kafkaesque::Consumer::Config.new(
   settings: {
     "sasl.oauthbearer.token.endpoint.url" => "http://localhost:8080/realms/kafka-auth/protocol/openid-connect/token",
     "sasl.oauthbearer.client.id"          => "kafka-client",
-    "sasl.oauthbearer.client.secret"      => "kafka-secret"
+    "sasl.oauthbearer.client.secret"      => "kafka-secret",
   }
 )
 
@@ -80,7 +80,6 @@ begin
   ensure
     client.close
   end
-
 rescue ex
   puts "Failed to connect to cluster: #{ex.message}"
 end

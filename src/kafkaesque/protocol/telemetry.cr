@@ -33,14 +33,14 @@ module Kafkaesque
         @accepted_compression_types,
         @push_interval_ms,
         @delta_temporality,
-        @requested_metrics
+        @requested_metrics,
       )
       end
 
       def self.deserialize(decoder : Decoder) : GetTelemetrySubscriptionsResponse
         throttle_time_ms = decoder.read_int32
         error_code = decoder.read_int16
-        
+
         client_instance_id = Bytes.new(16)
         decoder.io.read_fully(client_instance_id)
 
@@ -49,9 +49,9 @@ module Kafkaesque
         push_interval_ms = decoder.read_int32
         delta_temporality = decoder.read_boolean
         requested_metrics = decoder.read_compact_array { decoder.read_compact_string.to_s } || [] of String
-        
+
         decoder.read_tag_buffer
-        
+
         GetTelemetrySubscriptionsResponse.new(
           throttle_time_ms,
           error_code,

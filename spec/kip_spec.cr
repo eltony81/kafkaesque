@@ -27,7 +27,7 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
 
       io.rewind
       dec = Kafkaesque::Protocol::Decoder.new(io)
-      
+
       # Read back COMPACT_STRINGS and verify they match
       dec.read_compact_string.should eq("my-custom-client")
       dec.read_compact_string.should eq("1.2.3")
@@ -116,7 +116,7 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
       begin
         client = Kafkaesque::Client.new("127.0.0.1", broker.port)
         client.connect
-        
+
         client.api_versions.should_not be_empty
         # Verify that ApiVersions API key 18 is retrieved
         client.api_versions.any? { |info| info.api_key == 18 }.should be_true
@@ -155,10 +155,10 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
 
-      enc.write_int16(0_i16) # error_code
+      enc.write_int16(0_i16)        # error_code
       enc.write_compact_string(nil) # error_message
       enc.write_compact_string("member-123")
-      enc.write_int32(6) # member_epoch
+      enc.write_int32(6)    # member_epoch
       enc.write_int32(5000) # heartbeat_interval
       enc.write_tag_buffer
 
@@ -192,13 +192,13 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
 
       # Deserialization test
       io.clear
-      enc.write_int32(0) # throttle_time_ms
-      enc.write_int16(0_i16) # error_code
-      enc.io.write(client_id) # client_instance_id
-      enc.write_int32(99) # subscription_id
+      enc.write_int32(0)                                        # throttle_time_ms
+      enc.write_int16(0_i16)                                    # error_code
+      enc.io.write(client_id)                                   # client_instance_id
+      enc.write_int32(99)                                       # subscription_id
       enc.write_compact_array([1_i8]) { |c| enc.write_int8(c) } # accepted_compression_types
-      enc.write_int32(30000) # push_interval_ms
-      enc.write_boolean(true) # delta_temporality
+      enc.write_int32(30000)                                    # push_interval_ms
+      enc.write_boolean(true)                                   # delta_temporality
       enc.write_compact_array(["metric-a"]) { |m| enc.write_compact_string(m) }
       enc.write_tag_buffer
 
