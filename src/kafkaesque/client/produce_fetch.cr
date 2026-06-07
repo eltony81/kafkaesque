@@ -1,4 +1,7 @@
 module Kafkaesque
+  class BufferExhaustedException < Exception
+  end
+
   class Client
     # -----------------------------------------------------------------------
     # Produce: single-message produce with optional idempotency
@@ -85,25 +88,47 @@ module Kafkaesque
     def batch_produce(topic : String, key : Protocol::BytesOrString?, value : Protocol::BytesOrString?, partition : Int32 = 0, headers : Array(Protocol::RecordHeader) = [] of Protocol::RecordHeader, timestamp : Time? = nil)
       record = Protocol::Record.new(key, value, headers, timestamp: timestamp)
 
-      @batch_mutex.synchronize do
-        @produced_messages_count += 1
-        @produced_bytes_count += value.is_a?(String) ? value.bytesize : (value.try(&.size) || 0)
+      rec_size = 0_i64
+      rec_size += key.is_a?(String) ? key.bytesize : (key.try(&.size) || 0)
+      rec_size += value.is_a?(String) ? value.bytesize : (value.try(&.size) || 0)
+      headers.each do |h|
+        rec_size += h.key.bytesize
+        rec_size += h.value.is_a?(String) ? h.value.bytesize : (h.value.try(&.size) || 0)
+      end
 
-        # O(1) hash map lookup
-        if records = @pending_batch[{topic, partition}]?
-          records << record
-        else
-          @pending_batch[{topic, partition}] = [record]
+      start_time = Time.monotonic
+      while true
+        @batch_mutex.synchronize do
+          if @buffer_memory_used + rec_size <= @buffer_memory
+            @buffer_memory_used += rec_size
+            @produced_messages_count += 1
+            @produced_bytes_count += value.is_a?(String) ? value.bytesize : (value.try(&.size) || 0)
+
+            # O(1) hash map lookup
+            if records = @pending_batch[{topic, partition}]?
+              records << record
+            else
+              @pending_batch[{topic, partition}] = [record]
+            end
+
+            unless @batch_fiber_running
+              start_batch_fiber
+            end
+
+            total = @pending_batch.sum { |_, recs| recs.size }
+            if total >= @batch_max_size
+              @batch_channel.send(nil) rescue nil
+            end
+
+            return
+          end
         end
-      end
 
-      unless @batch_fiber_running
-        start_batch_fiber
-      end
-
-      total = @batch_mutex.synchronize { @pending_batch.sum { |_, recs| recs.size } }
-      if total >= @batch_max_size
-        @batch_channel.send(nil) rescue nil
+        if Time.monotonic - start_time >= @max_block_ms.milliseconds
+          raise BufferExhaustedException.new("Failed to allocate memory in batch accumulator within #{@max_block_ms} ms")
+        end
+        Fiber.yield
+        sleep 5.milliseconds
       end
     end
 
@@ -112,6 +137,26 @@ module Kafkaesque
         taken = @pending_batch.dup
         @pending_batch.clear
         taken
+      end
+
+      freed_bytes = 0_i64
+      entries.each do |_, records|
+        records.each do |rec|
+          k = rec.key
+          v = rec.value
+          freed_bytes += k.is_a?(String) ? k.bytesize : (k.try(&.size) || 0)
+          freed_bytes += v.is_a?(String) ? v.bytesize : (v.try(&.size) || 0)
+          rec.headers.each do |h|
+            h_v = h.value
+            freed_bytes += h.key.bytesize
+            freed_bytes += h_v.is_a?(String) ? h_v.bytesize : (h_v.try(&.size) || 0)
+          end
+        end
+      end
+
+      @batch_mutex.synchronize do
+        val = @buffer_memory_used - freed_bytes
+        @buffer_memory_used = val < 0_i64 ? 0_i64 : val
       end
 
       responses = [] of Protocol::ProduceResponse
@@ -271,7 +316,7 @@ module Kafkaesque
     # Low-level fetch
     # -----------------------------------------------------------------------
     def fetch(topic : String, partition : Int32 = 0, fetch_offset : Int64 = 0_i64, min_bytes : Int32 = 1) : Protocol::FetchResponse
-      req = Protocol::FetchRequest.new(topic, partition, fetch_offset, min_bytes)
+      req = Protocol::FetchRequest.new(topic, partition, fetch_offset, min_bytes, max_bytes: @fetch_max_bytes, partition_max_bytes: @max_partition_fetch_bytes)
 
       retries = @max_retries
       while retries > 0

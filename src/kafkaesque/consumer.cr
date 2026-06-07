@@ -59,6 +59,30 @@ module Kafkaesque
         @settings["auto.commit.interval.ms"]?.try(&.to_i) || 5000
       end
 
+      def fetch_max_bytes=(val : Int32)
+        set("fetch.max.bytes", val.to_s)
+      end
+
+      def fetch_max_bytes : Int32
+        @settings["fetch.max.bytes"]?.try(&.to_i) || 1048576
+      end
+
+      def max_partition_fetch_bytes=(val : Int32)
+        set("max.partition.fetch.bytes", val.to_s)
+      end
+
+      def max_partition_fetch_bytes : Int32
+        @settings["max.partition.fetch.bytes"]?.try(&.to_i) || 1048576
+      end
+
+      def metadata_refresh_interval_ms=(val : Int32)
+        set("topic.metadata.refresh.interval.ms", val.to_s)
+      end
+
+      def metadata_refresh_interval_ms : Int32
+        @settings["topic.metadata.refresh.interval.ms"]?.try(&.to_i) || 300000
+      end
+
       def set(key : String, value : String)
         @settings[key] = value
         setup_oauth_provider if key.starts_with?("sasl.oauthbearer")

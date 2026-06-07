@@ -48,6 +48,17 @@ module Kafkaesque
     getter consumed_messages_count : Int64 = 0_i64
     property settings : Hash(String, String)?
 
+    property buffer_memory : Int64 = 33554432_i64
+    property max_block_ms : Int32 = 60000
+    property fetch_max_bytes : Int32 = 1048576
+    property max_partition_fetch_bytes : Int32 = 1048576
+    property metadata_refresh_interval_ms : Int32 = 300000
+    property oauth_refresh_interval_ms : Int32 = 300000
+    property buffer_memory_used : Int64 = 0_i64
+    @metadata_refresh_running : Bool = false
+    @oauth_refresh_running : Bool = false
+    @current_oauth_token : String? = nil
+
     def initialize(
       @host : String,
       @port : Int32,
@@ -63,6 +74,33 @@ module Kafkaesque
       @ssl_context = ssl_context
       if @use_ssl && @ssl_context.nil? && settings
         @ssl_context = Client.build_ssl_context(settings)
+      end
+
+      if settings = @settings
+        if val = settings["buffer.memory"]?
+          @buffer_memory = val.to_i64
+        end
+        if val = settings["max.block.ms"]?
+          @max_block_ms = val.to_i
+        end
+        if val = settings["fetch.max.bytes"]?
+          @fetch_max_bytes = val.to_i
+        end
+        if val = settings["max.partition.fetch.bytes"]?
+          @max_partition_fetch_bytes = val.to_i
+        end
+        if val = settings["topic.metadata.refresh.interval.ms"]?
+          @metadata_refresh_interval_ms = val.to_i
+        end
+        if val = settings["sasl.oauthbearer.token.refresh.interval.ms"]?
+          @oauth_refresh_interval_ms = val.to_i
+        end
+        if val = settings["linger.ms"]?
+          @batch_linger_ms = val.to_i
+        end
+        if val = settings["batch.num.messages"]?
+          @batch_max_size = val.to_i
+        end
       end
     end
 
@@ -102,13 +140,17 @@ module Kafkaesque
       if mechanism == "OAUTHBEARER"
         token = @oauth_token_provider.try(&.call) || @sasl_token || @settings.try(&.[]?("sasl.password")) || @settings.try(&.[]?("sasl.oauthbearer.token"))
         if token
+          @current_oauth_token = token
           authenticate_sasl(conn, token)
         end
+        start_oauth_refresh_fiber if @oauth_token_provider
       elsif mechanism == "SCRAM-SHA-256" || mechanism == "SCRAM-SHA-512"
         username = @settings.try(&.[]?("sasl.scram.username")) || @settings.try(&.[]?("sasl.username")) || ""
         password = @settings.try(&.[]?("sasl.scram.password")) || @settings.try(&.[]?("sasl.password")) || ""
         authenticate_scram(conn, username, password, mechanism)
       end
+
+      start_metadata_refresh_fiber if @metadata_refresh_interval_ms > 0
     end
 
     private def authenticate_scram(conn : Connection, username : String, password : String, mechanism : String)
@@ -396,8 +438,9 @@ module Kafkaesque
       mechanism = @settings.try(&.[]?("sasl.mechanism")).try(&.upcase) || "OAUTHBEARER"
 
       if mechanism == "OAUTHBEARER"
-        token = @oauth_token_provider.try(&.call) || @sasl_token || @settings.try(&.[]?("sasl.password")) || @settings.try(&.[]?("sasl.oauthbearer.token"))
+        token = @current_oauth_token || @oauth_token_provider.try(&.call) || @sasl_token || @settings.try(&.[]?("sasl.password")) || @settings.try(&.[]?("sasl.oauthbearer.token"))
         if token
+          @current_oauth_token = token
           authenticate_sasl(conn, token)
         end
       elsif mechanism == "SCRAM-SHA-256" || mechanism == "SCRAM-SHA-512" || mechanism == "SCRAM-SHA-1"
@@ -510,6 +553,8 @@ module Kafkaesque
       stop_heartbeat_fiber
       stop_batch_fiber
       stop_prefetch
+      stop_metadata_refresh_fiber
+      stop_oauth_refresh_fiber
       @broker_connections.each_value do |conn|
         begin
           conn.close
@@ -519,6 +564,49 @@ module Kafkaesque
       @broker_connections.clear
       @connection.try(&.close)
       @connection = nil
+    end
+
+    private def start_metadata_refresh_fiber
+      return if @metadata_refresh_running
+      @metadata_refresh_running = true
+      spawn do
+        while @metadata_refresh_running
+          sleep @metadata_refresh_interval_ms.milliseconds
+          break unless @metadata_refresh_running
+          begin
+            topics = @partition_leaders.keys.map { |k| k.split(":")[0] }.uniq
+            fetch_metadata(topics.empty? ? nil : topics)
+          rescue ex
+            Log.debug { "Background metadata refresh failed: #{ex.message}" }
+          end
+        end
+      end
+    end
+
+    private def stop_metadata_refresh_fiber
+      @metadata_refresh_running = false
+    end
+
+    private def start_oauth_refresh_fiber
+      return if @oauth_refresh_running
+      @oauth_refresh_running = true
+      spawn do
+        while @oauth_refresh_running
+          sleep @oauth_refresh_interval_ms.milliseconds
+          break unless @oauth_refresh_running
+          if provider = @oauth_token_provider
+            begin
+              @current_oauth_token = provider.call
+            rescue ex
+              Log.warn { "Background OAuth token refresh failed: #{ex.message}" }
+            end
+          end
+        end
+      end
+    end
+
+    private def stop_oauth_refresh_fiber
+      @oauth_refresh_running = false
     end
 
     def query_api_versions : Protocol::ApiVersionsResponse

@@ -57,6 +57,22 @@ module Kafkaesque
         @settings["acks"]? || "1"
       end
 
+      def buffer_memory=(val : Int64)
+        set("buffer.memory", val.to_s)
+      end
+
+      def buffer_memory : Int64
+        @settings["buffer.memory"]?.try(&.to_i64) || 33554432_i64
+      end
+
+      def max_block_ms=(val : Int32)
+        set("max.block.ms", val.to_s)
+      end
+
+      def max_block_ms : Int32
+        @settings["max.block.ms"]?.try(&.to_i) || 60000
+      end
+
       def set(key : String, value : String)
         @settings[key] = value
         setup_oauth_provider if key.starts_with?("sasl.oauthbearer")

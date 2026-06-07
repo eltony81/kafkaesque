@@ -150,6 +150,8 @@ Settings:
 | `retries` | `String` | `3` | Number of times to retry producing a message before failing. |
 | `retry.backoff.ms` | `String` | `100` | Time to wait before attempting a retry. |
 | `transactional.id` | `String` | `nil` | Unique ID enabling transactional delivery across restarts. |
+| `buffer.memory` | `String` | `33554432` | Size limit (in bytes) of the producer's batch accumulator queue. |
+| `max.block.ms` | `String` | `60000` | Max duration (in milliseconds) a produce call will block when the memory budget is full before raising a `BufferExhaustedException`. |
 
 ### Consumer Configuration
 
@@ -164,6 +166,9 @@ Settings:
 | `enable.auto.commit` | `String` | `true` | Periodically commit offsets in the background. |
 | `auto.commit.interval.ms` | `String` | `5000` | Interval to auto-commit offsets. |
 | `fetch.min.bytes` | `String` | `1` | Minimum data amount the broker should return for a fetch request. |
+| `fetch.max.bytes` | `String` | `1048576` | Max data limit (in bytes) for a single network fetch request. |
+| `max.partition.fetch.bytes` | `String` | `1048576` | Max partition-level data limit (in bytes) fetched from a single broker partition. |
+| `topic.metadata.refresh.interval.ms` | `String` | `300000` | Period (in milliseconds) at which the client updates active topic metadata in the background. |
 
 ### SASL & OAuthBearer (OIDC) Settings
 
@@ -173,6 +178,7 @@ Settings:
 | `sasl.oauthbearer.token.endpoint.url` | `String` | `nil` | Keycloak/OIDC server URL endpoint to fetch OAuth access tokens. |
 | `sasl.oauthbearer.client.id` | `String` | `nil` | The Client ID used for client credentials flow. |
 | `sasl.oauthbearer.client.secret` | `String` | `nil` | The Client Secret used for client credentials flow. |
+| `sasl.oauthbearer.token.refresh.interval.ms` | `String` | `300000` | Period (in milliseconds) at which the client refreshes the OAuth access token in the background. |
 
 ---
 
@@ -382,6 +388,43 @@ describe "My Kafka Application" do
     end
   end
 end
+```
+
+### 7. Production-Ready Client Controls
+
+For mission-critical production environments, you can configure memory budgeting, fetch limits, background metadata refresh, and OAuthBearer token refresh intervals:
+
+```crystal
+require "kafkaesque"
+
+# 1. Producer Memory Budgeting and Backpressure
+producer_config = Kafkaesque::Producer::Config.new(
+  bootstrap_servers: ["localhost:9092"],
+  settings: {
+    "buffer.memory"                      => "33554432", # limit accumulator queue to 32MB
+    "max.block.ms"                       => "15000",    # block calling fiber up to 15s when buffer is full
+    "topic.metadata.refresh.interval.ms" => "300000",   # refresh broker topology every 5 minutes
+  }
+)
+producer = Kafkaesque::Producer.new(producer_config)
+
+# 2. Consumer Fetch Size Constraints and background refresh loops
+consumer_config = Kafkaesque::Consumer::Config.new(
+  bootstrap_servers: ["localhost:9092"],
+  group_id: "production-consumer-group",
+  settings: {
+    "security.protocol"                          => "SASL_PLAINTEXT",
+    "sasl.mechanism"                             => "OAUTHBEARER",
+    "sasl.oauthbearer.token.endpoint.url"        => "http://localhost:8080/realms/kafka/protocol/openid-connect/token",
+    "sasl.oauthbearer.client.id"                 => "consumer-app",
+    "sasl.oauthbearer.client.secret"             => "secret-123",
+    "fetch.max.bytes"                            => "5242880", # max 5MB per fetch network request
+    "max.partition.fetch.bytes"                  => "1048576", # max 1MB per partition
+    "topic.metadata.refresh.interval.ms"         => "300000",  # refresh broker metadata every 5 minutes
+    "sasl.oauthbearer.token.refresh.interval.ms" => "300000",  # refresh OAuth access token every 5 minutes
+  }
+)
+consumer = Kafkaesque::Consumer.new(consumer_config)
 ```
 
 ---

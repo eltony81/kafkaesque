@@ -354,8 +354,9 @@ module Kafkaesque
       property fetch_offset : Int64
       property max_bytes : Int32
       property min_bytes : Int32
+      property partition_max_bytes : Int32
 
-      def initialize(@topic, @partition, @fetch_offset, @min_bytes = 1, @max_bytes = 1048576)
+      def initialize(@topic, @partition, @fetch_offset, @min_bytes = 1, @max_bytes = 1048576, @partition_max_bytes = 1048576)
       end
 
       def serialize(encoder : Encoder)
@@ -369,8 +370,8 @@ module Kafkaesque
           encoder.write_string(topic_name)
           encoder.write_array([@partition]) do |part_idx|
             encoder.write_int32(part_idx)
-            encoder.write_int64(@fetch_offset) # fetch_offset
-            encoder.write_int32(1048576)       # partition_max_bytes
+            encoder.write_int64(@fetch_offset)        # fetch_offset
+            encoder.write_int32(@partition_max_bytes) # partition_max_bytes
           end
         end
       end
