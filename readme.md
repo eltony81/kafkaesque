@@ -819,6 +819,20 @@ Along with the payload, each message is accompanied by metadata key string `"sen
   - Kafkaesque runs its background prefetching engine on Crystal fibers.
   - Franz-Go / Go Confluent rely on Go's internal scheduling loops.
 
+### 🛠️ Compilation & Execution Parameters
+
+The benchmark targets are built and executed using the following configurations to isolate threading behavior and garbage collection performance:
+
+| Client Engine | Compilation Command / Flags | Runtime Execution Parameters |
+| :--- | :--- | :--- |
+| **Kafkaesque (Single Thread)** | `crystal build src/kafkaesque_<type>.cr -o bin/kafkaesque_<type>_st --release` | Executed directly using Crystal's standard single-threaded runtime. |
+| **Kafkaesque (Multithread)** | `crystal build src/kafkaesque_<type>.cr -o bin/kafkaesque_<type> --release -Dpreview_mt` | Executed with `GC_MARKERS=8 GC_INITIAL_HEAP_SIZE=128M CRYSTAL_WORKERS=8` to manage concurrent GC markings. |
+| **Go Confluent** | `go build -o bin/go_<type> ./<type>` (dynamically linked to `librdkafka`) | Executed directly (Go standard runtime manages scheduling/GC). |
+| **Franz-Go** | `go build -o bin/franz_<type> ./franz_<type>` | Executed directly (Go standard runtime manages scheduling/GC). |
+
+> [!NOTE]
+> Single-core benchmark variants are executed under `taskset -c 2` (pinned to CPU Core 2). Multi-core benchmark variants are executed under `taskset -c 0-7` (pinned to CPU Cores 0 through 7).
+
 ---
 
 ### 1. Single-Core Results (Pinned to Core 2)
