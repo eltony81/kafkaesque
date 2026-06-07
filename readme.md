@@ -827,8 +827,8 @@ The benchmark targets are built and executed using the following configurations 
 | :--- | :--- | :--- |
 | **Kafkaesque (Single Thread)** | `crystal build src/kafkaesque_<type>.cr -o bin/kafkaesque_<type>_st --release` | Executed directly using Crystal's standard single-threaded runtime. |
 | **Kafkaesque (Multithread)** | `crystal build src/kafkaesque_<type>.cr -o bin/kafkaesque_<type> --release -Dpreview_mt` | Executed with `GC_MARKERS=8 GC_INITIAL_HEAP_SIZE=128M CRYSTAL_WORKERS=8` to manage concurrent GC markings. |
-| **Go Confluent** | `go build -o bin/go_<type> ./<type>` (dynamically linked to `librdkafka`) | Executed directly (Go standard runtime manages scheduling/GC). |
-| **Franz-Go** | `go build -o bin/franz_<type> ./franz_<type>` | Executed directly (Go standard runtime manages scheduling/GC). |
+| **Go Confluent** | `CGO_CFLAGS="-O3 -march=native" CGO_LDFLAGS="-O3" go build -ldflags="-s -w" -o bin/go_<type> ./<type>` | Executed with `GOMAXPROCS=1` (Single-Core) or `GOMAXPROCS=8` (Multi-Core) to align the scheduler with resource limits. |
+| **Franz-Go** | `go build -ldflags="-s -w" -o bin/franz_<type> ./franz_<type>` | Executed with `GOMAXPROCS=1` (Single-Core) or `GOMAXPROCS=8` (Multi-Core) to align the scheduler with resource limits. |
 
 > [!NOTE]
 > Single-core benchmark variants are executed under `taskset -c 2` (pinned to CPU Core 2). Multi-core benchmark variants are executed under `taskset -c 0-7` (pinned to CPU Cores 0 through 7).
