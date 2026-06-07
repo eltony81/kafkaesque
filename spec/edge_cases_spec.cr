@@ -73,10 +73,10 @@ describe "Protocol Edge Cases & Boundary Inputs" do
     it "handles skipping tag buffers with tagged fields" do
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
-      
+
       # Write tag count = 2
       enc.write_uvarint(2)
-      
+
       # Tag 1, length 3, content [1, 2, 3]
       enc.write_uvarint(1)
       enc.write_uvarint(3)
@@ -98,7 +98,7 @@ describe "Protocol Edge Cases & Boundary Inputs" do
     it "simulates latency correctly" do
       broker = Kafkaesque::MockBroker.new
       broker.latency_ms = 150
-      
+
       begin
         client = Kafkaesque::Client.new("127.0.0.1", broker.port)
         start_time = Time.monotonic
@@ -116,7 +116,7 @@ describe "Protocol Edge Cases & Boundary Inputs" do
 
       begin
         client = Kafkaesque::Client.new("127.0.0.1", broker.port)
-        # The first request (ApiVersions) during connect might succeed or be cut off, 
+        # The first request (ApiVersions) during connect might succeed or be cut off,
         # but subsequent ones will fail because the socket is closed.
         expect_raises(Exception) do
           client.connect
@@ -140,7 +140,7 @@ describe "Protocol Edge Cases & Boundary Inputs" do
         commit_req = Kafkaesque::Protocol::OffsetCommitRequest.new(
           "test-group", 0, "member", "test-topic", 0, 1024_i64, "meta"
         )
-        
+
         # Build envelope and send
         io = IO::Memory.new
         enc = Kafkaesque::Protocol::Encoder.new(io)
@@ -150,9 +150,9 @@ describe "Protocol Edge Cases & Boundary Inputs" do
         enc.write_int32(1)
         enc.write_string("client")
         enc.write_varint(0) # request tag buffer
-        
+
         commit_req.serialize(enc)
-        
+
         # Send raw request
         payload_io = IO::Memory.new
         payload_io.write_bytes(io.size.to_i32, IO::ByteFormat::BigEndian)
@@ -164,7 +164,7 @@ describe "Protocol Edge Cases & Boundary Inputs" do
         resp_size = socket.read_bytes(Int32, IO::ByteFormat::BigEndian)
         resp_corr = socket.read_bytes(Int32, IO::ByteFormat::BigEndian)
         resp_tag_buf = socket.read_byte # response flexible header tag buffer
-        
+
         resp_buf = Bytes.new(resp_size - 5)
         socket.read_fully(resp_buf)
         resp_dec = Kafkaesque::Protocol::Decoder.new(IO::Memory.new(resp_buf))
@@ -180,7 +180,7 @@ describe "Protocol Edge Cases & Boundary Inputs" do
         enc2.write_int16(3_i16)
         enc2.write_int32(2)
         enc2.write_string("client")
-        
+
         fetch_req.serialize(enc2)
 
         payload_io2 = IO::Memory.new
@@ -195,7 +195,7 @@ describe "Protocol Edge Cases & Boundary Inputs" do
         socket.read_fully(resp_buf2)
         resp_dec2 = Kafkaesque::Protocol::Decoder.new(IO::Memory.new(resp_buf2))
         resp2 = Kafkaesque::Protocol::OffsetFetchResponse.deserialize(resp_dec2)
-        
+
         resp2.committed_offset.should eq(1024_i64)
       ensure
         socket.try &.close rescue nil

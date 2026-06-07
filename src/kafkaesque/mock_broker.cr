@@ -8,7 +8,7 @@ module Kafkaesque
     @server : TCPServer
     @running = true
     @handlers = {} of Int16 => Proc(Protocol::Decoder, Int16, IO::Memory)
-    
+
     # Failure & Latency simulation properties
     property latency_ms : Int32 = 0
     property drop_after_requests : Int32? = nil
@@ -90,11 +90,11 @@ module Kafkaesque
             generation_id = decoder.read_int32
             member_id = decoder.read_compact_string
             group_instance_id = decoder.read_compact_string
-            
+
             topic = ""
             partition = 0
             offset = -1_i64
-            
+
             decoder.read_compact_array do
               topic = decoder.read_compact_string.to_s
               decoder.read_compact_array do
@@ -125,13 +125,12 @@ module Kafkaesque
               enc.write_tag_buffer
             end
             enc.write_tag_buffer
-
           elsif api_key == 9_i16
             # Default stateful OffsetFetch handling
             group_id = decoder.read_string.to_s
             topic = ""
             partition = 0
-            
+
             decoder.read_array do
               topic = decoder.read_string.to_s
               decoder.read_array do
@@ -152,11 +151,10 @@ module Kafkaesque
               enc.write_array([partition]) do |p|
                 enc.write_int32(p)
                 enc.write_int64(offset)
-                enc.write_string(nil) # metadata
+                enc.write_string(nil)  # metadata
                 enc.write_int16(0_i16) # error_code
               end
             end
-
           elsif api_key == 18_i16
             # Default ApiVersions response
             enc = Protocol::Encoder.new(response_body_io)
