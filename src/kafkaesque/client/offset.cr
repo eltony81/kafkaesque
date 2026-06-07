@@ -11,12 +11,13 @@ module Kafkaesque
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)
 
+      flexible = Protocol::OffsetCommitRequest::API_VERSION >= 8_i16
       req_header = Protocol::RequestHeader.new(
         api_key: Protocol::OffsetCommitRequest::API_KEY,
         api_version: Protocol::OffsetCommitRequest::API_VERSION,
         correlation_id: next_correlation_id,
         client_id: @client_id,
-        flexible: false
+        flexible: flexible
       )
 
       req_header.serialize(req_enc)
@@ -26,7 +27,7 @@ module Kafkaesque
 
       response_io = conn.read_response
       response_dec = Protocol::Decoder.new(response_io)
-      Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: flexible)
       Protocol::OffsetCommitResponse.deserialize(response_dec)
     end
 

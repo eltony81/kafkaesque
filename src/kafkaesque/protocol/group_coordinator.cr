@@ -170,14 +170,14 @@ module Kafkaesque
 
     struct OffsetCommitRequest
       API_KEY     = 8_i16
-      API_VERSION = 2_i16 # v2: widely supported, includes retention_time_ms
+      API_VERSION = 9_i16
 
       property group_id : String
       property generation_id : Int32
       property member_id : String
       property topic : String
       property partition : Int32
-      property offset : Int64 # the *next* offset to be read (committed + 1)
+      property offset : Int64
       property metadata : String?
 
       def initialize(@group_id, @generation_id, @member_id,
@@ -185,19 +185,22 @@ module Kafkaesque
       end
 
       def serialize(encoder : Encoder)
-        encoder.write_string(@group_id)
-        encoder.write_int32(@generation_id)
-        encoder.write_string(@member_id)
-        encoder.write_int64(-1_i64) # retention_time_ms: -1 = use broker default
-        encoder.write_array([@topic]) do |t|
-          encoder.write_string(t)
-          encoder.write_array([@partition]) do |p|
+        encoder.write_compact_string(@group_id)
+        encoder.write_int32(@generation_id) # group_epoch / generation_id
+        encoder.write_compact_string(@member_id)
+        encoder.write_compact_string(nil) # group_instance_id
+        encoder.write_compact_array([@topic]) do |t|
+          encoder.write_compact_string(t)
+          encoder.write_compact_array([@partition]) do |p|
             encoder.write_int32(p)
             encoder.write_int64(@offset)
-            encoder.write_int64(-1_i64) # timestamp (v2: -1 = wall clock)
-            encoder.write_string(@metadata)
+            encoder.write_int32(-1) # committed_leader_epoch: -1 (default)
+            encoder.write_compact_string(@metadata)
+            encoder.write_tag_buffer
           end
+          encoder.write_tag_buffer
         end
+        encoder.write_tag_buffer
       end
     end
 
@@ -210,17 +213,20 @@ module Kafkaesque
       end
 
       def self.deserialize(decoder : Decoder) : OffsetCommitResponse
-        decoder.read_int32 # throttle_time_ms
+        throttle_time_ms = decoder.read_int32
         topic = ""
         partition = 0
         error_code = 0_i16
-        decoder.read_array do
-          topic = decoder.read_string.to_s
-          decoder.read_array do
+        decoder.read_compact_array do
+          topic = decoder.read_compact_string.to_s
+          decoder.read_compact_array do
             partition = decoder.read_int32
             error_code = decoder.read_int16
+            decoder.read_tag_buffer
           end
+          decoder.read_tag_buffer
         end
+        decoder.read_tag_buffer
         OffsetCommitResponse.new(topic, partition, error_code)
       end
     end
@@ -231,7 +237,7 @@ module Kafkaesque
 
     struct OffsetFetchRequest
       API_KEY     = 9_i16
-      API_VERSION = 1_i16 # v1: per-partition request, no top-level error_code in response
+      API_VERSION = 3_i16 # v3: includes throttle_time_ms in response
 
       property group_id : String
       property topic : String

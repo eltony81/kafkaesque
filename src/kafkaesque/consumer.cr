@@ -93,6 +93,8 @@ module Kafkaesque
     getter assigned_partitions = [] of Int32
     @topics = [] of String
     @running = true
+    @initialized = false
+    @closed = false
     @client : Client?
     @coordinator_client : Client?
     @heartbeat_fiber : Fiber?
@@ -108,6 +110,7 @@ module Kafkaesque
 
     @partition_offsets = Hash(Tuple(String, Int32), Int64).new
     @offset_mutex = Mutex.new
+    @fetcher_mutex = Mutex.new
 
     @prefetch_channel : Channel(Array(Protocol::Record))
     @active_fetchers : Hash(Tuple(String, Int32), Bool)
@@ -122,9 +125,12 @@ module Kafkaesque
     def initialize(@config : Config)
       @partition_offsets = Hash(Tuple(String, Int32), Int64).new
       @offset_mutex = Mutex.new
+      @fetcher_mutex = Mutex.new
       @prefetch_channel = Channel(Array(Protocol::Record)).new(100)
       @active_fetchers = Hash(Tuple(String, Int32), Bool).new
       @paused_partitions = Set(Tuple(String, Int32)).new
+      @initialized = false
+      @closed = false
     end
 
     def on_partitions_assigned(&block : Array(Int32) -> Void)
@@ -322,18 +328,15 @@ module Kafkaesque
         # Spawn background fetchers
         assignments.each do |tp|
           offset = @offset_mutex.synchronize { @partition_offsets[{tp.topic, tp.partition}]? } || default_initial_offset
-          @active_fetchers[{tp.topic, tp.partition}] = true
           spawn_fetcher(tp.topic, tp.partition, offset, client)
         end
 
         # Stream records from prefetch queue
         begin
           while @running
-            select
-            when records = @prefetch_channel.receive
-              records.each do |record|
-                block.call(record)
-              end
+            records = @prefetch_channel.receive
+            records.each do |record|
+              block.call(record)
             end
           end
         rescue ex : Exception
@@ -431,9 +434,10 @@ module Kafkaesque
       # Spawn background fetchers for assigned partitions
       @hb_mutex.synchronize { @assigned_partitions.dup }.each do |part|
         offset = @offset_mutex.synchronize { @partition_offsets[{topic_name, part}]? } || default_initial_offset
-        @active_fetchers[{topic_name, part}] = true
         spawn_fetcher(topic_name, part, offset, coord_client)
       end
+
+      @initialized = true
 
       auto_commit = @config.settings["enable.auto.commit"]? != "false"
       auto_commit_interval = (@config.settings["auto.commit.interval.ms"]? || "5000").to_i
@@ -470,13 +474,9 @@ module Kafkaesque
 
       begin
         while @running
-          select
-          when records = @prefetch_channel.receive
-            records.each do |record|
-              block.call(record)
-            end
-          when timeout(200.milliseconds)
-            Fiber.yield
+          records = @prefetch_channel.receive
+          records.each do |record|
+            block.call(record)
           end
         end
       rescue ex : Exception
@@ -601,10 +601,9 @@ module Kafkaesque
           end
 
           # Spawn fetchers for new partitions:
-          if @running && !@prefetch_channel.closed? && (coord = @coordinator_client)
+          if @initialized && @running && !@prefetch_channel.closed? && (coord = @coordinator_client)
             (new_partitions - @assigned_partitions).each do |part|
               offset = @offset_mutex.synchronize { @partition_offsets[{topic_name, part}]? } || default_initial_offset
-              @active_fetchers[{topic_name, part}] = true
               spawn_fetcher(topic_name, part, offset, coord)
             end
           end
@@ -620,13 +619,20 @@ module Kafkaesque
     end
 
     private def spawn_fetcher(topic : String, partition : Int32, start_offset : Int64, client : Client)
+      @fetcher_mutex.synchronize do
+        if @active_fetchers[{topic, partition}]?
+          @offset_mutex.synchronize { @partition_offsets[{topic, partition}] = start_offset }
+          return
+        end
+        @active_fetchers[{topic, partition}] = true
+      end
       @offset_mutex.synchronize { @partition_offsets[{topic, partition}] = start_offset }
 
       spawn do
         current_offset = start_offset
         fetch_min_bytes = (@config.settings["fetch.min.bytes"]? || "1").to_i
 
-        while @running && @active_fetchers[{topic, partition}]?
+        while @running && @fetcher_mutex.synchronize { @active_fetchers[{topic, partition}]? }
           if paused?(topic, partition)
             sleep 100.milliseconds
             next
@@ -638,10 +644,23 @@ module Kafkaesque
               if poll_resp.records.empty?
                 sleep 50.milliseconds
               else
-                @prefetch_channel.send(poll_resp.records)
-                if last_record = poll_resp.records.last?
-                  current_offset = last_record.offset + 1
-                  @offset_mutex.synchronize { @partition_offsets[{topic, partition}] = current_offset }
+                # Re-check paused state AFTER the (potentially long-blocking) fetch
+                # returns. If pause() was called while the fetch was in-flight we
+                # must NOT deliver the records — discard them and do NOT advance the
+                # offset so they will be re-fetched once the partition is resumed.
+                if paused?(topic, partition)
+                  Log.debug { "Discarding #{poll_resp.records.size} in-flight records for paused partition #{topic}:#{partition}" }
+                  sleep 100.milliseconds
+                else
+                  valid_records = poll_resp.records.select { |r| r.offset >= current_offset }
+                  unless valid_records.empty?
+                    @prefetch_channel.send(valid_records)
+                  end
+                  if last_record = poll_resp.records.last?
+                    next_offset = last_record.offset + 1
+                    current_offset = next_offset if next_offset > current_offset
+                    @offset_mutex.synchronize { @partition_offsets[{topic, partition}] = current_offset }
+                  end
                 end
               end
             elsif poll_resp.error_code == 1
@@ -661,14 +680,16 @@ module Kafkaesque
             sleep 500.milliseconds
           end
         end
-        @active_fetchers.delete({topic, partition})
+        @fetcher_mutex.synchronize { @active_fetchers.delete({topic, partition}) }
       end
     end
 
     def close
       @running = false
-      @active_fetchers.each_key do |part|
-        @active_fetchers[part] = false
+      @fetcher_mutex.synchronize do
+        @active_fetchers.each_key do |part|
+          @active_fetchers[part] = false
+        end
       end
       @prefetch_channel.close rescue nil
       close_internal
@@ -680,44 +701,59 @@ module Kafkaesque
           sleep (interval_ms / 1000.0).seconds
           break unless @running
 
+          owned_tp = [] of Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions
+          group_id = ""
+          instance_id = nil
+          session_timeout = 30000
+          assignor = "cooperative-sticky"
+          member_id = ""
+          member_epoch = 0
+
           @hb_mutex.synchronize do
-            begin
-              owned_tp = [] of Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions
-              if !@assigned_partitions.empty? && !@topic_uuid.empty?
-                owned_tp = [
-                  Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions.new(@topic_uuid, @assigned_partitions),
-                ]
-              end
+            if !@assigned_partitions.empty? && !@topic_uuid.empty?
+              owned_tp = [
+                Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions.new(@topic_uuid, @assigned_partitions),
+              ]
+            end
+            group_id = @config.settings["group.id"]? || "default-group"
+            instance_id = @config.settings["group.instance.id"]?
+            session_timeout = (@config.settings["session.timeout.ms"]? || "30000").to_i
+            assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
+            member_id = @member_id
+            member_epoch = @member_epoch
+          end
 
-              group_id = @config.settings["group.id"]? || "default-group"
-              instance_id = @config.settings["group.instance.id"]?
-              session_timeout = (@config.settings["session.timeout.ms"]? || "30000").to_i
+          begin
+            r = client.consumer_group_heartbeat(
+              group_id: group_id,
+              member_id: member_id,
+              member_epoch: member_epoch,
+              instance_id: instance_id,
+              rebalance_timeout_ms: session_timeout,
+              subscribed_topic_names: @topics,
+              server_assignor: assignor,
+              topic_partitions: owned_tp
+            )
 
-              assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
-              r = client.consumer_group_heartbeat(
-                group_id: group_id,
-                member_id: @member_id,
-                member_epoch: @member_epoch,
-                instance_id: instance_id,
-                rebalance_timeout_ms: session_timeout,
-                subscribed_topic_names: @topics,
-                server_assignor: assignor,
-                topic_partitions: owned_tp
-              )
-
-              if r.error_code == 0
+            if r.error_code == 0
+              @hb_mutex.synchronize do
                 @member_epoch = r.member_epoch
                 apply_assignment(r)
               end
-            rescue ex
-              Log.error(exception: ex) { "Background heartbeat error" }
             end
+          rescue ex
+            Log.error(exception: ex) { "Background heartbeat error" }
           end
         end
       end
     end
 
     private def close_internal
+      @hb_mutex.synchronize do
+        return if @closed
+        @closed = true
+      end
+
       # Leave the group cleanly by sending heartbeat with epoch = -1
       if !@assigned_partitions.empty?
         if cb_rev = @on_partitions_revoked

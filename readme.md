@@ -1,7 +1,7 @@
 # Kafkaesque
 
 > [!CAUTION]
-> This library is designed to be more performant than Kafka libraries in other languages for the specific use case of supporting applications built with the [cryspace](https://github.com/eltony81/cryspace) library. However, it may contain bugs and has not been tested for general-purpose usage. It is not recommended for production or other goals.
+> This library is optimized specifically to support applications built with the [cryspace](https://github.com/eltony81/cryspace) framework, aiming to outperform Kafka clients in other languages for this specific use case. However, it has not been tested for general-purpose use, may contain bugs, and is not recommended for production environments.
 
 Kafkaesque is a modern, dependency-light Crystal client library for Apache Kafka. It includes support for KIP-848 consumer group protocols, transactional delivery, and pluggable OAuthBearer (OIDC) token authentication out-of-the-box.
 
@@ -443,6 +443,18 @@ Evented streaming client supporting server-side KIP-848 partition coordination.
 * **`on_partitions_assigned(&block : Array(Int32) -> Void)`**: Callback triggered when the broker coordinator assigns partition ownership to the consumer member.
 * **`on_partitions_revoked(&block : Array(Int32) -> Void)`**: Callback triggered when ownership of assigned partitions is revoked.
 * **`close`**: Leaves the consumer group cleanly, closes prefetch channels, and terminates connection sockets.
+
+---
+
+## Implemented Kafka Improvement Proposals (KIPs)
+
+Kafkaesque implements several modern Kafka Improvement Proposals (KIPs) to provide enterprise-grade features, telemetry, and performance optimizations:
+
+- **[KIP-392: Allow consumers to fetch from closest replica](https://cwiki.apache.org/confluence/display/KAFKA/KIP-392%3A+Allow+consumers+to+fetch+from+closest+replica)**: Improves network efficiency and latency by allowing consumers to fetch messages from follower replicas in the same rack/zone rather than always hitting the leader.
+- **[KIP-511: Collect and Send Client Software Name and Version](https://cwiki.apache.org/confluence/display/KAFKA/KIP-511%3A+Collect+and+Send+Client+Software+Name+and+Version)**: Identifies the client as `kafkaesque` and exposes its semantic version through the `ApiVersions` request/response, helping operators monitor client distributions.
+- **[KIP-714: Client Metrics and Telemetry](https://cwiki.apache.org/confluence/display/KAFKA/KIP-714%3A+Limit+Client+Telemetry+Collection+to+Required+Metrics)**: Allows brokers to dynamically request client telemetry metrics (via OTLP format) using `TelemetrySubscription` and `PushTelemetry` requests, facilitating centralized observability.
+- **[KIP-848: Next-Generation Consumer Group Protocol](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Group+Protocol)**: Moves partition assignment logic to the broker-side, enabling faster and more stable rebalances, simpler client logic, and a single heartbeat loop.
+- **[KIP-932: Share Groups (Queues for Kafka)](https://cwiki.apache.org/confluence/display/KAFKA/KIP-932%3A+Queues+for+Kafka)**: Introduces share groups for cooperative queue-based messaging, allowing multiple consumers to pull and acknowledge individual records concurrently from the same topic.
 
 ---
 
