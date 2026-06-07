@@ -12,6 +12,8 @@ module Kafkaesque
     def initialize(@host : String, @port : Int32, @use_ssl : Bool = false, context : OpenSSL::SSL::Context::Client? = nil)
       tcp = TCPSocket.new(@host, @port)
       tcp.tcp_nodelay = true
+      tcp.read_timeout = 30.seconds
+      tcp.write_timeout = 30.seconds
       if @use_ssl
         ctx = context || OpenSSL::SSL::Context::Client.new
         @socket = OpenSSL::SSL::Socket::Client.new(tcp, ctx)

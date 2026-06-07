@@ -123,7 +123,11 @@ module Kafkaesque
 
             total = @pending_batch.sum { |_, recs| recs.size }
             if total >= @batch_max_size
-              @batch_channel.send(nil) rescue nil
+              select
+              when @batch_channel.send(nil)
+              else
+                # if channel is full, do not block main fiber
+              end
             end
 
             return
