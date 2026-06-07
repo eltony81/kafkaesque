@@ -403,7 +403,7 @@ module Kafkaesque
           @hb_mutex.synchronize do
             begin
               owned_tp = [] of Protocol::ConsumerGroupHeartbeatRequest::TopicPartitions
-              assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
+              assignor = @config.settings["group.remote.assignor"]? || "uniform"
               r = coord_client.consumer_group_heartbeat(
                 group_id: group_id,
                 member_id: @member_id,
@@ -564,7 +564,7 @@ module Kafkaesque
     end
 
     private def join_consumer_group(coord_client : Client, group_id : String, instance_id : String?, session_timeout : Int32) : Int32
-      assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
+      assignor = @config.settings["group.remote.assignor"]? || "uniform"
       hb_resp = coord_client.consumer_group_heartbeat(
         group_id: group_id,
         member_id: @member_id,
@@ -743,7 +743,7 @@ module Kafkaesque
           group_id = ""
           instance_id = nil
           session_timeout = 30000
-          assignor = "cooperative-sticky"
+          assignor = "uniform"
           member_id = ""
           member_epoch = 0
 
@@ -756,7 +756,7 @@ module Kafkaesque
             group_id = @config.settings["group.id"]? || "default-group"
             instance_id = @config.settings["group.instance.id"]?
             session_timeout = (@config.settings["session.timeout.ms"]? || "30000").to_i
-            assignor = @config.settings["group.remote.assignor"]? || "cooperative-sticky"
+            assignor = @config.settings["group.remote.assignor"]? || "uniform"
             member_id = @member_id
             member_epoch = @member_epoch
           end
