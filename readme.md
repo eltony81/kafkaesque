@@ -880,12 +880,14 @@ Below is a visualization comparing how Kafkaesque eliminates network latency dur
 ```mermaid
 graph TD
     subgraph "Kafkaesque Prefetch (Crystal)"
+        direction TB
         K_Broker[Broker Partition] -->|TCP Socket Read| K_Prefetch["Prefetch Fiber (Background)"]
         K_Prefetch -->|Direct Channel Send| K_Channel["Crystal Channel (Memory Queue)"]
         K_Channel -->|"O(1) Memory Pull"| K_User["User Fiber (each block)"]
     end
 
     subgraph "Franz-Go Polling (Go)"
+        direction TB
         G_Broker[Broker Partition] -->|TCP Socket Read| G_Client[Client Connection]
         G_Client -->|Blocking Network Poll| G_User["User Poll Loop (PollFetches)"]
     end
