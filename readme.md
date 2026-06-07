@@ -889,7 +889,10 @@ graph TD
         K_Prefetch -->|Direct Channel Send| K_Channel
         K_Channel -->|"O(1) Memory Pull"| K_User
     end
+```
 
+```mermaid
+graph TD
     subgraph "Franz-Go Polling Pipeline (Go)"
         G_Broker[Broker Partition]
         G_Client[Client Connection]
