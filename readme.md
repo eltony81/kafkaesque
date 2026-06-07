@@ -892,7 +892,8 @@ graph LR
         G_Client -->|Blocking Network Poll| G_User["User Poll Loop (PollFetches)"]
     end
 
-    K_Broker ~~~ G_Broker
+    K_Broker --> G_Broker
+    linkStyle 5 stroke:#0000,stroke-width:0px;
 ```
 
 ---
