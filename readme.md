@@ -891,6 +891,8 @@ graph LR
         G_Broker[Broker Partition] -->|TCP Socket Read| G_Client[Client Connection]
         G_Client -->|Blocking Network Poll| G_User["User Poll Loop (PollFetches)"]
     end
+
+    K_Broker ~~~ G_Broker
 ```
 
 ---
