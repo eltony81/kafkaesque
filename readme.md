@@ -859,6 +859,41 @@ opts := []kgo.Opt{
 
 ---
 
+## Performance Architecture Report
+
+Kafkaesque is designed to maximize throughput and minimize latency by taking advantage of Crystal's native cooperative concurrency model and memory efficiency. The table below outlines the core differences in architectural design between Kafkaesque and typical runtime clients (e.g., Go/JVM-based clients):
+
+### Comparison Table: Performance Drivers
+
+| Design Area | Traditional Clients (e.g. Franz-Go, Go Confluent) | Kafkaesque (Crystal) | Performance Impact |
+| :--- | :--- | :--- | :--- |
+| **Serialization** | Runtime reflection, interface boxing, or dynamic memory offsets. | Statically resolved compile-time serialization. | Eliminates runtime type checking and parsing overhead on every record. |
+| **Concurrency Model** | Managed OS threads (goroutines) with preemption and locking. | Lightweight cooperative fibers running on event-driven loops. | Avoids CPU context switching and lock contention on single-core setups. |
+| **Prefetch Engine** | Blocking poll loops or channel multiplexing per partition. | Fiber-based event loops feeding into a native lock-free memory channel. | Amortizes network latency to zero by loading batches in the background. |
+| **Memory Reuse** | Dynamic heap allocation per message, leading to GC pressure. | Thread-safe `ObjectPool` recycling `IO::Memory` serialization buffers. | Reduces GC sweep frequency and prevents memory fragmentation. |
+| **Socket Dispatch** | OS default buffer delay (Nagle's algorithm). | Explicit application-controlled batching with `TCP_NODELAY`. | Delivers instant dispatch on batch completion without packet fragmentation. |
+
+### Consumer Prefetch Pipeline
+
+Below is a visualization of how Kafkaesque eliminates network latency during message consumption:
+
+```mermaid
+graph TD
+    subgraph Kafka Cluster
+        Broker[Broker Partition]
+    end
+    subgraph Kafkaesque Client
+        PrefetchFiber["Prefetch Fiber (Background Loop)"]
+        Channel["Crystal Channel (Memory Queue)"]
+        UserLoop["User Fiber (each block)"]
+    end
+    Broker -->|TCP Socket Read| PrefetchFiber
+    PrefetchFiber -->|Direct Channel Send| Channel
+    Channel -->|O(1) Memory Pull| UserLoop
+```
+
+---
+
 ## License
 
 This project is licensed under the MIT License.
