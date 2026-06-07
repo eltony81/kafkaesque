@@ -180,6 +180,13 @@ Settings:
 | `sasl.oauthbearer.client.secret` | `String` | `nil` | The Client Secret used for client credentials flow. |
 | `sasl.oauthbearer.token.refresh.interval.ms` | `String` | `300000` | Period (in milliseconds) at which the client refreshes the OAuth access token in the background. |
 
+### Enterprise Observability & Advanced Security Settings
+
+| Parameter Key | Type | Default | Description |
+|---|---|---|---|
+| `metrics.prometheus.port` | `String` | `nil` | Port on which the embedded Prometheus HTTP server listens. If not set, the metrics HTTP server is disabled. |
+| `ssl.keystore.reload.interval.ms` | `String` | `0` (disabled) | Frequency (in milliseconds) at which the dynamic mTLS monitor scans keystore files for changes and reloads them. |
+
 ---
 
 ## Detailed Tutorials
@@ -657,6 +664,71 @@ offsets = {
 }
 consumer.commit(offsets)       # Synchronous commit
 consumer.commit_async(offsets) # Asynchronous commit
+```
+
+#### 8. Enterprise Observability & Advanced Security
+
+Kafkaesque provides lightweight, zero-dependency tools for observability and enterprise compliance.
+
+##### A. Prometheus Metrics & HTTP Exporter
+Start an embedded HTTP server in the background serving standard Prometheus format metrics:
+```crystal
+config = Kafkaesque::Producer::Config.new(
+  bootstrap_servers: ["localhost:9092"],
+  settings: {
+    "metrics.prometheus.port" => "19090", # HTTP Server listens on http://localhost:19090/metrics
+  }
+)
+producer = Kafkaesque::Producer.new(config)
+```
+
+##### B. W3C Tracing context headers (OpenTelemetry/W3C)
+Register callbacks to automatically inject/extract span tracing identifiers (e.g. `traceparent` headers) across messages:
+```crystal
+# On Producer (Inject):
+producer.on_send do |record|
+  Kafkaesque::Tracing.inject_trace_context(record.headers, trace_id: "...", span_id: "...", sampled: true)
+  record
+end
+
+# On Consumer (Extract):
+consumer.on_consume do |record|
+  if ctx = Kafkaesque::Tracing.extract_trace_context(record.headers)
+    Log.info { "Processing message from trace: #{ctx[:trace_id]}" }
+  end
+end
+```
+
+##### C. Dynamic mTLS Key Reloading
+Monitors the `mtime` of TLS certificate files on disk and rebuilds the `ssl_context` on the fly without client restarts:
+```crystal
+config = Kafkaesque::Producer::Config.new(
+  bootstrap_servers: ["localhost:9093"],
+  settings: {
+    "security.protocol"               => "SSL",
+    "ssl.keystore.location"           => "/etc/certs/client.crt",
+    "ssl.keystore.key.location"       => "/etc/certs/client.key",
+    "ssl.keystore.reload.interval.ms" => "60000", # Reload check loop frequency (1 minute)
+  }
+)
+```
+
+##### D. Custom SASL Authenticator Mechanisms
+Register custom enterprise authentication wrapper mechanisms (e.g. Kerberos GSSAPI, specialized tokens):
+```crystal
+# Register Custom Mechanism Builder
+Kafkaesque::Client.register_sasl_mechanism("MY_CORP_AUTH") do |connection, settings|
+  # Implement custom GSSAPI handshake/authentication exchange directly over connection socket...
+end
+
+# Use configured mechanism in client settings
+client = Kafkaesque::Client.new(
+  host: "localhost",
+  port: 9092,
+  settings: {
+    "sasl.mechanism" => "MY_CORP_AUTH",
+  }
+)
 ```
 
 ---

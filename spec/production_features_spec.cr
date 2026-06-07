@@ -78,9 +78,9 @@ describe "Production Ready Enhancements" do
       end
 
       # This will block initially but should succeed once flush_batch runs and frees memory
-      start_time = Time.monotonic
+      start_time = Time.instant
       client.batch_produce("test-topic", nil, "val2-size-20-bytes-123")
-      ((Time.monotonic - start_time) >= 30.milliseconds).should be_true
+      ((Time.instant - start_time) >= 30.milliseconds).should be_true
     ensure
       client.try &.close rescue nil
       broker.close

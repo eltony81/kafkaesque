@@ -20,6 +20,8 @@ require "./kafkaesque/client"
 require "./kafkaesque/topic_partition"
 require "./kafkaesque/consumer"
 require "./kafkaesque/producer"
+require "./kafkaesque/metrics_server"
+require "./kafkaesque/tracing"
 require "./kafkaesque/config_loader"
 
 require "log"
@@ -27,6 +29,6 @@ require "http/client"
 require "uri"
 
 module Kafkaesque
-  VERSION = "2.2.1"
+  VERSION = "2.3.0"
   Log     = ::Log.for("kafkaesque")
 end

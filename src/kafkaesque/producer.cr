@@ -103,6 +103,7 @@ module Kafkaesque
     @transactional_id : String?
     @in_transaction : Bool = false
     @txn_partitions : Set(String) = Set(String).new
+    @on_send : (Protocol::Record -> Protocol::Record)? = nil
 
     def self.new(&block : Config ->)
       cfg = Config.build(&block)
@@ -241,30 +242,42 @@ module Kafkaesque
       end
     end
 
+    def on_send(&block : Protocol::Record -> Protocol::Record)
+      @on_send = block
+    end
+
     def produce(topic : String, payload : Protocol::BytesOrString, key : Protocol::BytesOrString? = nil, headers : Array(Protocol::RecordHeader)? = nil, partition : Int32? = nil, timestamp : Time? = nil)
       client = @client || raise "Producer is closed"
+
+      # Pre-create record
+      record = Protocol::Record.new(key, payload, headers || [] of Protocol::RecordHeader, timestamp: timestamp)
+
+      # Intercept record
+      if cb = @on_send
+        record = cb.call(record)
+      end
 
       actual_partition = if partition
                            partition
                          else
-                           key_bytes = case key
-                                       when String
-                                         key.to_slice
-                                       when Bytes
-                                         key
-                                       else
-                                         nil
-                                       end
-                           val_bytes = case payload
-                                       when String
-                                         payload.to_slice
-                                       when Bytes
-                                         payload
-                                       else
-                                         Bytes.empty
-                                       end
+                           k_bytes = case record.key
+                                     when String
+                                       record.key.as(String).to_slice
+                                     when Bytes
+                                       record.key.as(Bytes)
+                                     else
+                                       nil
+                                     end
+                           v_bytes = case record.value
+                                     when String
+                                       record.value.as(String).to_slice
+                                     when Bytes
+                                       record.value.as(Bytes)
+                                     else
+                                       Bytes.empty
+                                     end
                            parts_count = client.partitions_count(topic)
-                           @config.partitioner.partition(topic, key_bytes, val_bytes, parts_count)
+                           @config.partitioner.partition(topic, k_bytes, v_bytes, parts_count)
                          end
 
       if @in_transaction && (tx_id = @transactional_id)
@@ -281,7 +294,7 @@ module Kafkaesque
       attempts = 0
       loop do
         begin
-          client.batch_produce(topic, key, payload, partition: actual_partition, headers: headers || [] of Protocol::RecordHeader, timestamp: timestamp)
+          client.batch_produce(topic, record, partition: actual_partition)
           break
         rescue ex
           attempts += 1

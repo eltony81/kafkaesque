@@ -58,6 +58,12 @@ module Kafkaesque
     @metadata_refresh_running : Bool = false
     @oauth_refresh_running : Bool = false
     @current_oauth_token : String? = nil
+    property metrics_port : Int32? = nil
+    @metrics_server : MetricsServer? = nil
+    property ssl_reload_interval_ms : Int32 = 0
+    @ssl_reload_running = false
+    @cert_last_mtime : Time? = nil
+    @key_last_mtime : Time? = nil
 
     def initialize(
       @host : String,
@@ -101,6 +107,39 @@ module Kafkaesque
         if val = settings["batch.num.messages"]?
           @batch_max_size = val.to_i
         end
+        if val = settings["metrics.prometheus.port"]?
+          @metrics_port = val.to_i
+        end
+        if val = settings["ssl.keystore.reload.interval.ms"]?
+          @ssl_reload_interval_ms = val.to_i
+        end
+      end
+    end
+
+    alias SASLAuthenticatorBuilder = (Connection, Hash(String, String) -> Void)
+    @@custom_sasl_mechanisms = {} of String => SASLAuthenticatorBuilder
+
+    def self.register_sasl_mechanism(name : String, &builder : SASLAuthenticatorBuilder)
+      @@custom_sasl_mechanisms[name.upcase] = builder
+    end
+
+    def prometheus_metrics : String
+      String.build do |str|
+        str << "# HELP kafkaesque_produced_messages_total Total number of produced messages\n"
+        str << "# TYPE kafkaesque_produced_messages_total counter\n"
+        str << "kafkaesque_produced_messages_total{client_id=\"#{@client_id}\"} #{@produced_messages_count}\n\n"
+
+        str << "# HELP kafkaesque_produced_bytes_total Total size of produced messages in bytes\n"
+        str << "# TYPE kafkaesque_produced_bytes_total counter\n"
+        str << "kafkaesque_produced_bytes_total{client_id=\"#{@client_id}\"} #{@produced_bytes_count}\n\n"
+
+        str << "# HELP kafkaesque_consumed_messages_total Total number of consumed messages\n"
+        str << "# TYPE kafkaesque_consumed_messages_total counter\n"
+        str << "kafkaesque_consumed_messages_total{client_id=\"#{@client_id}\"} #{@consumed_messages_count}\n\n"
+
+        str << "# HELP kafkaesque_broker_connections Total number of active broker connections\n"
+        str << "# TYPE kafkaesque_broker_connections gauge\n"
+        str << "kafkaesque_broker_connections{client_id=\"#{@client_id}\"} #{@broker_connections.size}\n"
       end
     end
 
@@ -137,7 +176,9 @@ module Kafkaesque
 
       mechanism = @settings.try(&.[]?("sasl.mechanism")).try(&.upcase) || "OAUTHBEARER"
 
-      if mechanism == "OAUTHBEARER"
+      if builder = @@custom_sasl_mechanisms[mechanism]?
+        builder.call(conn, @settings || {} of String => String)
+      elsif mechanism == "OAUTHBEARER"
         token = @oauth_token_provider.try(&.call) || @sasl_token || @settings.try(&.[]?("sasl.password")) || @settings.try(&.[]?("sasl.oauthbearer.token"))
         if token
           @current_oauth_token = token
@@ -151,6 +192,8 @@ module Kafkaesque
       end
 
       start_metadata_refresh_fiber if @metadata_refresh_interval_ms > 0
+      start_ssl_reload_fiber if @ssl_reload_interval_ms > 0
+      start_metrics_server if @metrics_port
     end
 
     private def authenticate_scram(conn : Connection, username : String, password : String, mechanism : String)
@@ -437,7 +480,9 @@ module Kafkaesque
     private def authenticate_connection(conn : Connection)
       mechanism = @settings.try(&.[]?("sasl.mechanism")).try(&.upcase) || "OAUTHBEARER"
 
-      if mechanism == "OAUTHBEARER"
+      if builder = @@custom_sasl_mechanisms[mechanism]?
+        builder.call(conn, @settings || {} of String => String)
+      elsif mechanism == "OAUTHBEARER"
         token = @current_oauth_token || @oauth_token_provider.try(&.call) || @sasl_token || @settings.try(&.[]?("sasl.password")) || @settings.try(&.[]?("sasl.oauthbearer.token"))
         if token
           @current_oauth_token = token
@@ -555,6 +600,8 @@ module Kafkaesque
       stop_prefetch
       stop_metadata_refresh_fiber
       stop_oauth_refresh_fiber
+      stop_ssl_reload_fiber
+      stop_metrics_server
       @broker_connections.each_value do |conn|
         begin
           conn.close
@@ -607,6 +654,71 @@ module Kafkaesque
 
     private def stop_oauth_refresh_fiber
       @oauth_refresh_running = false
+    end
+
+    private def start_ssl_reload_fiber
+      return if @ssl_reload_running || @ssl_reload_interval_ms <= 0
+      @ssl_reload_running = true
+
+      cert_path = @settings.try(&.[]?("ssl.keystore.location"))
+      key_path = @settings.try(&.[]?("ssl.keystore.key.location")) || cert_path
+
+      return unless cert_path && File.exists?(cert_path)
+
+      @cert_last_mtime = File.info(cert_path).modification_time
+      @key_last_mtime = key_path && File.exists?(key_path) ? File.info(key_path).modification_time : nil
+
+      spawn do
+        while @ssl_reload_running
+          sleep @ssl_reload_interval_ms.milliseconds
+          break unless @ssl_reload_running
+
+          begin
+            changed = false
+            if cert_path && File.exists?(cert_path)
+              curr_mtime = File.info(cert_path).modification_time
+              if curr_mtime != @cert_last_mtime
+                @cert_last_mtime = curr_mtime
+                changed = true
+              end
+            end
+            if key_path && File.exists?(key_path)
+              curr_mtime = File.info(key_path).modification_time
+              if curr_mtime != @key_last_mtime
+                @key_last_mtime = curr_mtime
+                changed = true
+              end
+            end
+
+            if changed && (settings = @settings)
+              Log.info { "Dynamic SSL/TLS Keystore change detected. Rebuilding SSL/TLS Client Context..." }
+              @ssl_context = Client.build_ssl_context(settings)
+            end
+          rescue ex
+            Log.warn { "Failed to check or reload SSL context: #{ex.message}" }
+          end
+        end
+      end
+    end
+
+    private def stop_ssl_reload_fiber
+      @ssl_reload_running = false
+    end
+
+    private def start_metrics_server
+      return if @metrics_server
+      if port = @metrics_port
+        srv = MetricsServer.new(port) { prometheus_metrics }
+        srv.start
+        @metrics_server = srv
+      end
+    end
+
+    private def stop_metrics_server
+      if srv = @metrics_server
+        srv.close
+        @metrics_server = nil
+      end
     end
 
     def query_api_versions : Protocol::ApiVersionsResponse

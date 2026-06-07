@@ -51,7 +51,7 @@ module Kafkaesque
         break if socket.closed?
         begin
           size = socket.read_bytes(Int32, IO::ByteFormat::BigEndian) rescue nil
-          break if size.nil? || size <= 0
+          break if size.nil? || size <= 0 || size > 10_000_000
 
           buf = Bytes.new(size)
           socket.read_fully(buf)

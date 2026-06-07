@@ -131,6 +131,7 @@ module Kafkaesque
 
     @on_partitions_assigned : (Array(Int32) -> Void)? = nil
     @on_partitions_revoked : (Array(Int32) -> Void)? = nil
+    @on_consume : (Protocol::Record -> Void)? = nil
 
     @partition_offsets = Hash(Tuple(String, Int32), Int64).new
     @offset_mutex = Mutex.new
@@ -266,6 +267,9 @@ module Kafkaesque
             resp.topics.each do |t|
               t.partitions.each do |p|
                 p.records.each do |record|
+                  if cb = @on_consume
+                    cb.call(record)
+                  end
                   block.call(record)
                   client.share_acknowledge(
                     group_id: group_id,
@@ -360,6 +364,9 @@ module Kafkaesque
           while @running
             records = @prefetch_channel.receive
             records.each do |record|
+              if cb = @on_consume
+                cb.call(record)
+              end
               block.call(record)
             end
           end
@@ -500,6 +507,9 @@ module Kafkaesque
         while @running
           records = @prefetch_channel.receive
           records.each do |record|
+            if cb = @on_consume
+              cb.call(record)
+            end
             block.call(record)
           end
         end
@@ -508,6 +518,10 @@ module Kafkaesque
       ensure
         close_internal
       end
+    end
+
+    def on_consume(&block : Protocol::Record -> Void)
+      @on_consume = block
     end
 
     private def resolve_coordinator(group_id : String) : Client

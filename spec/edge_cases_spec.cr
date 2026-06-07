@@ -101,9 +101,9 @@ describe "Protocol Edge Cases & Boundary Inputs" do
 
       begin
         client = Kafkaesque::Client.new("127.0.0.1", broker.port)
-        start_time = Time.monotonic
+        start_time = Time.instant
         client.connect
-        duration = Time.monotonic - start_time
+        duration = Time.instant - start_time
         duration.to_f.should be >= 0.14
       ensure
         broker.close

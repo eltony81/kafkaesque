@@ -87,22 +87,28 @@ module Kafkaesque
 
     def batch_produce(topic : String, key : Protocol::BytesOrString?, value : Protocol::BytesOrString?, partition : Int32 = 0, headers : Array(Protocol::RecordHeader) = [] of Protocol::RecordHeader, timestamp : Time? = nil)
       record = Protocol::Record.new(key, value, headers, timestamp: timestamp)
+      batch_produce(topic, record, partition)
+    end
 
+    def batch_produce(topic : String, record : Protocol::Record, partition : Int32 = 0)
       rec_size = 0_i64
-      rec_size += key.is_a?(String) ? key.bytesize : (key.try(&.size) || 0)
-      rec_size += value.is_a?(String) ? value.bytesize : (value.try(&.size) || 0)
-      headers.each do |h|
+      k = record.key
+      v = record.value
+      rec_size += k.is_a?(String) ? k.bytesize : (k.try(&.size) || 0)
+      rec_size += v.is_a?(String) ? v.bytesize : (v.try(&.size) || 0)
+      record.headers.each do |h|
+        h_v = h.value
         rec_size += h.key.bytesize
-        rec_size += h.value.is_a?(String) ? h.value.bytesize : (h.value.try(&.size) || 0)
+        rec_size += h_v.is_a?(String) ? h_v.bytesize : (h_v.try(&.size) || 0)
       end
 
-      start_time = Time.monotonic
+      start_time = Time.instant
       while true
         @batch_mutex.synchronize do
           if @buffer_memory_used + rec_size <= @buffer_memory
             @buffer_memory_used += rec_size
             @produced_messages_count += 1
-            @produced_bytes_count += value.is_a?(String) ? value.bytesize : (value.try(&.size) || 0)
+            @produced_bytes_count += v.is_a?(String) ? v.bytesize : (v.try(&.size) || 0)
 
             # O(1) hash map lookup
             if records = @pending_batch[{topic, partition}]?
@@ -124,7 +130,7 @@ module Kafkaesque
           end
         end
 
-        if Time.monotonic - start_time >= @max_block_ms.milliseconds
+        if Time.instant - start_time >= @max_block_ms.milliseconds
           raise BufferExhaustedException.new("Failed to allocate memory in batch accumulator within #{@max_block_ms} ms")
         end
         Fiber.yield
