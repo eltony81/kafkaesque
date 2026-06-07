@@ -889,7 +889,7 @@ graph TD
     end
     Broker -->|TCP Socket Read| PrefetchFiber
     PrefetchFiber -->|Direct Channel Send| Channel
-    Channel -->|O(1) Memory Pull| UserLoop
+    Channel -->|"O(1) Memory Pull"| UserLoop
 ```
 
 ---
