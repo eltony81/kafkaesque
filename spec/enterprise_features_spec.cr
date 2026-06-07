@@ -1,6 +1,6 @@
 require "./spec_helper"
 
-describe "Enterprise Features (v2.2.0)" do
+describe "Enterprise Features (v2.2.1)" do
   describe "SASL SCRAM-SHA-1" do
     it "correctly computes client final message and signatures for SCRAM-SHA-1" do
       auth = Kafkaesque::Protocol::ScramAuthenticator.new("user", "Password123", :sha1)
