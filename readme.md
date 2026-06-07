@@ -875,21 +875,29 @@ Kafkaesque is designed to maximize throughput and minimize latency by taking adv
 
 ### Consumer Prefetch Pipeline
 
-Below is a visualization of how Kafkaesque eliminates network latency during message consumption:
+Below is a visualization comparing how Kafkaesque eliminates network latency during message consumption using prefetch channels versus Go Franz's standard polling mechanism:
 
 ```mermaid
 graph TD
-    subgraph Kafka Cluster
-        Broker[Broker Partition]
+    subgraph Kafkaesque Prefetch Pipeline (Crystal)
+        K_Broker[Broker Partition]
+        K_Prefetch["Prefetch Fiber (Background)"]
+        K_Channel["Crystal Channel (Memory Queue)"]
+        K_User["User Fiber (each block)"]
+        
+        K_Broker -->|TCP Socket Read| K_Prefetch
+        K_Prefetch -->|Direct Channel Send| K_Channel
+        K_Channel -->|"O(1) Memory Pull"| K_User
     end
-    subgraph Kafkaesque Client
-        PrefetchFiber["Prefetch Fiber (Background Loop)"]
-        Channel["Crystal Channel (Memory Queue)"]
-        UserLoop["User Fiber (each block)"]
+
+    subgraph Franz-Go Polling Pipeline (Go)
+        G_Broker[Broker Partition]
+        G_Client[Client Connection]
+        G_User["User Poll Loop (PollFetches)"]
+        
+        G_Broker -->|TCP Socket Read| G_Client
+        G_Client -->|Blocking Network Poll| G_User
     end
-    Broker -->|TCP Socket Read| PrefetchFiber
-    PrefetchFiber -->|Direct Channel Send| Channel
-    Channel -->|"O(1) Memory Pull"| UserLoop
 ```
 
 ---
