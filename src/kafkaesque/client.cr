@@ -502,7 +502,8 @@ module Kafkaesque
         attempts = 0
         loop do
           begin
-            conn = Connection.new(broker.host, broker.port, @use_ssl, @ssl_context)
+            host = broker.host == "localhost" ? "127.0.0.1" : broker.host
+            conn = Connection.new(host, broker.port, @use_ssl, @ssl_context)
             @broker_connections[node_id] = conn
             authenticate_connection(conn)
             break
