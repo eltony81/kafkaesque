@@ -1,4 +1,6 @@
-# Kafkaesque
+# Kafkaesque (kafkaesque.cr)
+
+[![GitHub Repository](https://img.shields.io/badge/GitHub-eltony81%2Fkafkaesque.cr-blue?logo=github)](https://github.com/eltony81/kafkaesque.cr)
 
 > [!CAUTION]
 > This library is optimized specifically to support applications built with the [cryspace](https://github.com/eltony81/cryspace) framework, aiming to outperform Kafka clients in other languages for this specific use case. However, it has not been tested for general-purpose use, may contain bugs, and is not recommended for production environments.
@@ -14,7 +16,7 @@ Add this to your application's `shard.yml`:
 ```yaml
 dependencies:
   kafkaesque:
-    github: eltony81/kafkaesque
+    github: eltony81/kafkaesque.cr
 ```
 
 Then run `shards install`.

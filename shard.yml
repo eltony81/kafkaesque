@@ -1,9 +1,11 @@
 name: kafkaesque
 version: 2.3.3
-
+description: A dependency-light Apache Kafka client library for Crystal, supporting KIP-848, transactions, and OAuthBearer.
+homepage: https://github.com/eltony81/kafkaesque.cr
+repository: https://github.com/eltony81/kafkaesque.cr
 
 authors:
-  - eltony81
+  - eltony81 <antonio.difluri@gmail.com>
 
 targets:
   kafkaesque:
