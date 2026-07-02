@@ -35,6 +35,67 @@ module Kafkaesque
       end
     end
 
+    # KIP-932: batched coordinator lookup (FindCoordinator v6+). Required for
+    # SHARE key type — share-group coordination is scoped per (group, topic,
+    # partition) rather than per group, so a single request can resolve
+    # coordinators for many keys ("groupId:topicId:partition") at once.
+    struct BatchedFindCoordinatorRequest
+      API_KEY     = 10_i16
+      API_VERSION =  6_i16
+
+      property key_type : Int8
+      property coordinator_keys : Array(String)
+
+      def initialize(@coordinator_keys, @key_type = 0_i8)
+      end
+
+      def serialize(encoder : Encoder)
+        encoder.write_int8(@key_type)
+        encoder.write_compact_array(@coordinator_keys) do |key|
+          encoder.write_compact_string(key)
+        end
+        encoder.write_tag_buffer
+      end
+    end
+
+    struct CoordinatorResult
+      property key : String
+      property node_id : Int32
+      property host : String
+      property port : Int32
+      property error_code : Int16
+      property error_message : String?
+
+      def initialize(@key, @node_id, @host, @port, @error_code, @error_message)
+      end
+
+      def self.deserialize(decoder : Decoder) : CoordinatorResult
+        key = decoder.read_compact_string.to_s
+        node_id = decoder.read_int32
+        host = decoder.read_compact_string.to_s
+        port = decoder.read_int32
+        error_code = decoder.read_int16
+        error_message = decoder.read_compact_string
+        decoder.read_tag_buffer
+        CoordinatorResult.new(key, node_id, host, port, error_code, error_message)
+      end
+    end
+
+    struct BatchedFindCoordinatorResponse
+      property throttle_time_ms : Int32
+      property coordinators : Array(CoordinatorResult)
+
+      def initialize(@throttle_time_ms, @coordinators)
+      end
+
+      def self.deserialize(decoder : Decoder) : BatchedFindCoordinatorResponse
+        throttle_time_ms = decoder.read_int32
+        coordinators = decoder.read_compact_array { CoordinatorResult.deserialize(decoder) } || [] of CoordinatorResult
+        decoder.read_tag_buffer
+        BatchedFindCoordinatorResponse.new(throttle_time_ms, coordinators)
+      end
+    end
+
     struct GroupProtocol
       property name : String
       property metadata : Bytes
@@ -57,7 +118,17 @@ module Kafkaesque
       property protocol_type : String
       property protocols : Array(GroupProtocol)
 
-      def initialize(@group_id, @member_id, @protocol_type = "consumer", @protocols = [GroupProtocol.new("range")])
+      # `protocols` defaults to a single "range" protocol whose metadata is a
+      # real serialized ConsumerProtocolSubscription for `topics` — required
+      # for a real broker to compute assignments (an empty metadata blob
+      # can't be assigned against). Pass `protocols` directly to offer
+      # multiple candidate assignor strategies.
+      def initialize(@group_id, @member_id, topics : Array(String) = [] of String, @protocol_type = "consumer", protocols : Array(GroupProtocol)? = nil)
+        @protocols = protocols || begin
+          io = IO::Memory.new
+          ConsumerProtocolSubscription.new(topics).serialize(io)
+          [GroupProtocol.new("range", io.to_slice)]
+        end
       end
 
       def serialize(encoder : Encoder)
@@ -77,8 +148,16 @@ module Kafkaesque
       property protocol_name : String?
       property leader_id : String
       property member_id : String
+      # member_id => subscription metadata bytes — only populated by the
+      # broker when this client is the group leader, who needs every
+      # member's subscription to compute the assignment sent via SyncGroup.
+      property members : Hash(String, Bytes)
 
-      def initialize(@error_code, @generation_id, @protocol_name, @leader_id, @member_id)
+      def initialize(@error_code, @generation_id, @protocol_name, @leader_id, @member_id, @members = {} of String => Bytes)
+      end
+
+      def leader? : Bool
+        !leader_id.empty? && leader_id == member_id
       end
 
       def self.deserialize(decoder : Decoder) : JoinGroupResponse
@@ -90,12 +169,14 @@ module Kafkaesque
         member_id = decoder.read_string.to_s
 
         # members array (only populated when we are the leader)
+        members = {} of String => Bytes
         decoder.read_array do
-          decoder.read_string # member_id
-          decoder.read_bytes  # metadata
+          mid = decoder.read_string.to_s
+          metadata = decoder.read_bytes
+          members[mid] = metadata || Bytes.empty
         end
 
-        JoinGroupResponse.new(error_code, generation_id, protocol_name, leader_id, member_id)
+        JoinGroupResponse.new(error_code, generation_id, protocol_name, leader_id, member_id, members)
       end
     end
 
@@ -106,15 +187,23 @@ module Kafkaesque
       property group_id : String
       property generation_id : Int32
       property member_id : String
+      # member_id => serialized ConsumerProtocolAssignment bytes. Only the
+      # group leader sends a populated map (every member's computed
+      # assignment); followers send an empty map and the broker relays back
+      # whatever the leader submitted for their own member_id.
+      property group_assignments : Hash(String, Bytes)
 
-      def initialize(@group_id, @generation_id, @member_id)
+      def initialize(@group_id, @generation_id, @member_id, @group_assignments = {} of String => Bytes)
       end
 
       def serialize(encoder : Encoder)
         encoder.write_string(@group_id)
         encoder.write_int32(@generation_id)
         encoder.write_string(@member_id)
-        encoder.write_array([] of String) { } # assignments (empty for non-leader)
+        encoder.write_array(@group_assignments.keys) do |mid|
+          encoder.write_string(mid)
+          encoder.write_bytes(@group_assignments[mid])
+        end
       end
     end
 

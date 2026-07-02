@@ -51,9 +51,12 @@ describe "Production Ready Enhancements" do
     broker.on_request(3_i16) do |decoder, version|
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
-      enc.write_array([] of String) { |_| }
-      enc.write_int32(-1)
-      enc.write_array([] of String) { |_| }
+      enc.write_int32(0)                        # throttle_time_ms
+      enc.write_compact_array([] of String) { } # brokers
+      enc.write_compact_string(nil)             # cluster_id
+      enc.write_int32(-1)                       # controller_id
+      enc.write_compact_array([] of String) { } # topics
+      enc.write_tag_buffer
       io
     end
 
@@ -95,9 +98,12 @@ describe "Production Ready Enhancements" do
       metadata_call_count += 1
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
-      enc.write_array([] of String) { |_| } # brokers
-      enc.write_int32(-1)                   # controller_id
-      enc.write_array([] of String) { |_| } # topics
+      enc.write_int32(0)                        # throttle_time_ms
+      enc.write_compact_array([] of String) { } # brokers
+      enc.write_compact_string(nil)             # cluster_id
+      enc.write_int32(-1)                       # controller_id
+      enc.write_compact_array([] of String) { } # topics
+      enc.write_tag_buffer
       io
     end
 

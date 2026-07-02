@@ -142,35 +142,53 @@ describe Kafkaesque::Protocol do
     io.rewind
 
     decoder = Kafkaesque::Protocol::Decoder.new(io)
-    topics = decoder.read_array { decoder.read_string }
+    topics = decoder.read_compact_array do
+      decoder.io.skip(16) # topic_id
+      name = decoder.read_compact_string
+      decoder.read_tag_buffer
+      name
+    end
     topics.should eq(["topic1", "topic2"])
 
-    # Let's test Response decoding
+    # Let's test Response decoding (v12: flexible/compact)
     io2 = IO::Memory.new
     enc2 = Kafkaesque::Protocol::Encoder.new(io2)
 
-    # 1 broker
-    enc2.write_int32(1)
-    enc2.write_int32(1)            # node_id
-    enc2.write_string("localhost") # host
-    enc2.write_int32(9092)         # port
-    enc2.write_string(nil)         # rack
+    enc2.write_int32(0) # throttle_time_ms
 
-    enc2.write_string("cluster1") # cluster_id
-    enc2.write_int32(1)           # controller_id
+    # 1 broker
+    enc2.write_compact_array([1]) do |_|
+      enc2.write_int32(1)                    # node_id
+      enc2.write_compact_string("localhost") # host
+      enc2.write_int32(9092)                 # port
+      enc2.write_compact_string(nil)         # rack
+      enc2.write_tag_buffer
+    end
+
+    enc2.write_compact_string("cluster1") # cluster_id
+    enc2.write_int32(1)                   # controller_id
 
     # 1 topic
-    enc2.write_int32(1)
-    enc2.write_int16(0)         # error_code
-    enc2.write_string("topic1") # name
-    enc2.write_boolean(false)   # is_internal
-    # 1 partition
-    enc2.write_int32(1)
-    enc2.write_int16(0)                                 # error_code
-    enc2.write_int32(0)                                 # partition_index
-    enc2.write_int32(1)                                 # leader
-    enc2.write_array([1]) { |id| enc2.write_int32(id) } # replicas
-    enc2.write_array([1]) { |id| enc2.write_int32(id) } # isr
+    enc2.write_compact_array([1]) do |_|
+      enc2.write_int16(0)                 # error_code
+      enc2.write_compact_string("topic1") # name
+      enc2.io.write(Bytes.new(16, 7_u8))  # topic_id
+      enc2.write_boolean(false)           # is_internal
+      # 1 partition
+      enc2.write_compact_array([1]) do |_|
+        enc2.write_int16(0)                                         # error_code
+        enc2.write_int32(0)                                         # partition_index
+        enc2.write_int32(1)                                         # leader
+        enc2.write_int32(-1)                                        # leader_epoch
+        enc2.write_compact_array([1]) { |id| enc2.write_int32(id) } # replicas
+        enc2.write_compact_array([1]) { |id| enc2.write_int32(id) } # isr
+        enc2.write_compact_array([] of Int32) { }                   # offline_replicas
+        enc2.write_tag_buffer
+      end
+      enc2.write_int32(-2147483648) # topic_authorized_operations
+      enc2.write_tag_buffer
+    end
+    enc2.write_tag_buffer
 
     io2.rewind
     dec2 = Kafkaesque::Protocol::Decoder.new(io2)
@@ -280,7 +298,7 @@ describe Kafkaesque::Protocol do
   it "serializes and deserializes JoinGroupRequest and Response" do
     io = IO::Memory.new
     enc = Kafkaesque::Protocol::Encoder.new(io)
-    req = Kafkaesque::Protocol::JoinGroupRequest.new("test-group", "member-1")
+    req = Kafkaesque::Protocol::JoinGroupRequest.new("test-group", "member-1", ["topic-a"])
     req.serialize(enc)
 
     io.rewind
@@ -293,8 +311,13 @@ describe Kafkaesque::Protocol do
       name = dec.read_string
       metadata = dec.read_bytes
       {name, metadata}
-    end
-    protocols.should eq([{"range", Bytes.empty}])
+    end.not_nil!
+    protocols.size.should eq(1)
+    protocols[0][0].should eq("range")
+    # metadata is a real, version-prefixed ConsumerProtocolSubscription — not
+    # an empty blob, since a real broker needs it to compute assignments.
+    subscription = Kafkaesque::Protocol::ConsumerProtocolSubscription.deserialize(protocols[0][1].not_nil!)
+    subscription.topics.should eq(["topic-a"])
 
     # v0 response: no throttle_time_ms field
     resp_io = IO::Memory.new
@@ -314,6 +337,7 @@ describe Kafkaesque::Protocol do
     resp.protocol_name.should eq("range")
     resp.leader_id.should eq("leader-1")
     resp.member_id.should eq("member-1")
+    resp.leader?.should be_false
   end
 
   it "serializes and deserializes SyncGroupRequest and Response" do

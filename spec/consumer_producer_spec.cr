@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "../src/kafkaesque/mock_broker"
 
 describe Kafkaesque::Producer do
   it "correctly configures and parses high-level properties from settings" do
@@ -279,6 +280,85 @@ describe "Kafkaesque Transactions Configuration" do
       cfg.set("transactional.id", "my-tx-id")
     end
     config.settings["transactional.id"].should eq("my-tx-id")
+  end
+
+  it "registers the group via AddOffsetsToTxn before TxnOffsetCommit in #send_offsets_to_transaction" do
+    broker = Kafkaesque::MockBroker.new
+    add_offsets_calls = 0
+    txn_offset_commit_calls = 0
+    end_txn_calls = 0
+    observed_group_id = ""
+
+    broker.on_request(22_i16) do |decoder, version| # InitProducerId
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+      enc.write_int32(0)      # throttle_time_ms
+      enc.write_int16(0_i16)  # error_code
+      enc.write_int64(42_i64) # producer_id
+      enc.write_int16(0_i16)  # producer_epoch
+      io
+    end
+
+    broker.on_request(25_i16) do |decoder, version| # AddOffsetsToTxn
+      add_offsets_calls += 1
+      decoder.read_string # transactional_id
+      decoder.read_int64  # producer_id
+      decoder.read_int16  # producer_epoch
+      observed_group_id = decoder.read_string || ""
+
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+      enc.write_int32(0)     # throttle_time_ms
+      enc.write_int16(0_i16) # error_code
+      io
+    end
+
+    broker.on_request(28_i16) do |decoder, version| # TxnOffsetCommit
+      txn_offset_commit_calls += 1
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+      enc.write_int32(0) # throttle_time_ms
+      enc.write_array(["my-topic"]) do |topic|
+        enc.write_string(topic)
+        enc.write_array([0]) do |part|
+          enc.write_int32(part)
+          enc.write_int16(0_i16) # error_code
+        end
+      end
+      io
+    end
+
+    broker.on_request(26_i16) do |decoder, version| # EndTxn
+      end_txn_calls += 1
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+      enc.write_int32(0)     # throttle_time_ms
+      enc.write_int16(0_i16) # error_code
+      io
+    end
+
+    begin
+      producer = Kafkaesque::Producer.new(
+        Kafkaesque::Producer::Config.new(
+          bootstrap_servers: ["127.0.0.1:#{broker.port}"],
+          settings: {"transactional.id" => "tx-1"}
+        )
+      )
+
+      producer.begin_transaction
+      producer.send_offsets_to_transaction({"my-topic:0" => 5_i64}, "my-group")
+      # A second call for the same group must not re-register via AddOffsetsToTxn.
+      producer.send_offsets_to_transaction({"my-topic:0" => 6_i64}, "my-group")
+      producer.commit_transaction
+
+      observed_group_id.should eq("my-group")
+      add_offsets_calls.should eq(1)
+      txn_offset_commit_calls.should eq(2)
+      end_txn_calls.should eq(1)
+    ensure
+      producer.try(&.close) rescue nil
+      broker.close
+    end
   end
 end
 

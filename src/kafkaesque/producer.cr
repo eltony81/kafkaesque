@@ -103,6 +103,7 @@ module Kafkaesque
     @transactional_id : String?
     @in_transaction : Bool = false
     @txn_partitions : Set(String) = Set(String).new
+    @txn_groups : Set(String) = Set(String).new
     @on_send : (Protocol::Record -> Protocol::Record)? = nil
 
     def self.new(&block : Config ->)
@@ -149,6 +150,7 @@ module Kafkaesque
       @transactional_id = @config.settings["transactional.id"]?
       @in_transaction = false
       @txn_partitions = Set(String).new
+      @txn_groups = Set(String).new
 
       # Configure compression setting (gzip -> 1_i16, snappy -> 2_i16, lz4 -> 3_i16, zstd -> 4_i16)
       if codec_setting = @config.compression_type || @config.settings["compression.type"]?
@@ -184,6 +186,7 @@ module Kafkaesque
 
       @in_transaction = true
       @txn_partitions.clear
+      @txn_groups.clear
     end
 
     def commit_transaction
@@ -202,6 +205,7 @@ module Kafkaesque
 
       @in_transaction = false
       @txn_partitions.clear
+      @txn_groups.clear
     end
 
     def abort_transaction
@@ -218,6 +222,7 @@ module Kafkaesque
 
       @in_transaction = false
       @txn_partitions.clear
+      @txn_groups.clear
     end
 
     def send_offsets_to_transaction(offsets : Hash(String, Int64), group_id : String)
@@ -227,6 +232,20 @@ module Kafkaesque
       end
 
       client = @client || raise "Producer is closed"
+
+      # The group must be registered as a participant in the transaction
+      # before its offsets can be committed as part of it — otherwise EndTxn
+      # doesn't know to fence/finalize this group alongside the produced
+      # partitions, breaking the exactly-once guarantee for consume-
+      # transform-produce pipelines.
+      unless @txn_groups.includes?(group_id)
+        add_resp = client.add_offsets_to_txn(tx_id, client.producer_id, client.producer_epoch, group_id)
+        if add_resp.error_code != 0
+          raise "AddOffsetsToTxn failed with error code: #{add_resp.error_code}"
+        end
+        @txn_groups << group_id
+      end
+
       nested = {} of String => Hash(Int32, Int64)
       offsets.each do |key, offset|
         parts = key.split(":")

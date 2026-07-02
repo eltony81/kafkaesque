@@ -1,8 +1,8 @@
 module Kafkaesque
   class Client
-    def find_coordinator(group_id : String) : Protocol::FindCoordinatorResponse
+    def find_coordinator(group_id : String, key_type : Int8 = 0_i8) : Protocol::FindCoordinatorResponse
       conn = @connection || raise "Client is not connected. Call #connect first."
-      req = Protocol::FindCoordinatorRequest.new(group_id)
+      req = Protocol::FindCoordinatorRequest.new(group_id, key_type)
 
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)
@@ -27,9 +27,38 @@ module Kafkaesque
       Protocol::FindCoordinatorResponse.deserialize(response_dec)
     end
 
-    def join_group(group_id : String, member_id : String) : Protocol::JoinGroupResponse
+    # KIP-932: resolves the share-group coordinator for one or more
+    # "groupId:topicId:partition" keys via FindCoordinator v6.
+    def find_share_coordinators(coordinator_keys : Array(String)) : Protocol::BatchedFindCoordinatorResponse
       conn = @connection || raise "Client is not connected. Call #connect first."
-      req = Protocol::JoinGroupRequest.new(group_id, member_id)
+      req = Protocol::BatchedFindCoordinatorRequest.new(coordinator_keys, key_type: 2_i8)
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::BatchedFindCoordinatorRequest::API_KEY,
+        api_version: Protocol::BatchedFindCoordinatorRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: true
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
+      Protocol::BatchedFindCoordinatorResponse.deserialize(response_dec)
+    end
+
+    def join_group(group_id : String, member_id : String, topics : Array(String) = [] of String) : Protocol::JoinGroupResponse
+      conn = @connection || raise "Client is not connected. Call #connect first."
+      req = Protocol::JoinGroupRequest.new(group_id, member_id, topics)
 
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)
@@ -54,9 +83,9 @@ module Kafkaesque
       Protocol::JoinGroupResponse.deserialize(response_dec)
     end
 
-    def sync_group(group_id : String, generation_id : Int32, member_id : String) : Protocol::SyncGroupResponse
+    def sync_group(group_id : String, generation_id : Int32, member_id : String, group_assignments : Hash(String, Bytes) = {} of String => Bytes) : Protocol::SyncGroupResponse
       conn = @connection || raise "Client is not connected. Call #connect first."
-      req = Protocol::SyncGroupRequest.new(group_id, generation_id, member_id)
+      req = Protocol::SyncGroupRequest.new(group_id, generation_id, member_id, group_assignments)
 
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)
@@ -200,6 +229,46 @@ module Kafkaesque
       response_dec = Protocol::Decoder.new(response_io)
       Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
       Protocol::ConsumerGroupHeartbeatResponse.deserialize(response_dec)
+    end
+
+    # KIP-932 Share Groups: joins/heartbeats a share-group membership, returning
+    # the broker-assigned partitions (mirrors consumer_group_heartbeat for KIP-848).
+    def share_group_heartbeat(
+      group_id : String,
+      member_id : String,
+      member_epoch : Int32,
+      rack_id : String? = nil,
+      subscribed_topic_names : Array(String) = [] of String,
+    ) : Protocol::ShareGroupHeartbeatResponse
+      conn = @connection || raise "Client is not connected. Call #connect first."
+      req = Protocol::ShareGroupHeartbeatRequest.new(
+        group_id: group_id,
+        member_id: member_id,
+        member_epoch: member_epoch,
+        rack_id: rack_id,
+        subscribed_topic_names: subscribed_topic_names
+      )
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::ShareGroupHeartbeatRequest::API_KEY,
+        api_version: Protocol::ShareGroupHeartbeatRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: true
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
+      Protocol::ShareGroupHeartbeatResponse.deserialize(response_dec)
     end
   end
 end

@@ -40,8 +40,15 @@ module Kafkaesque
     getter api_versions : Array(Protocol::ApiVersionInfo) = [] of Protocol::ApiVersionInfo
     @broker_connections = {} of Int32 => Connection
     @partition_leaders = {} of String => Int32
+    @partition_leader_epochs = {} of String => Int32
     @partition_replicas = {} of String => Array(Int32)
     @brokers = {} of Int32 => Protocol::Broker
+    @topic_ids = {} of String => Bytes
+    # Guards @broker_connections/@partition_leaders/@partition_leader_epochs/
+    # @partition_replicas/@brokers, which are mutated concurrently by
+    # per-partition fetcher fibers (and, under -Dpreview_mt, potentially
+    # different OS threads at once).
+    @metadata_mutex = Mutex.new
     @stats_callbacks = [] of (String -> Void)
     getter produced_messages_count : Int64 = 0_i64
     getter produced_bytes_count : Int64 = 0_i64
@@ -139,7 +146,7 @@ module Kafkaesque
 
         str << "# HELP kafkaesque_broker_connections Total number of active broker connections\n"
         str << "# TYPE kafkaesque_broker_connections gauge\n"
-        str << "kafkaesque_broker_connections{client_id=\"#{@client_id}\"} #{@broker_connections.size}\n"
+        str << "kafkaesque_broker_connections{client_id=\"#{@client_id}\"} #{@metadata_mutex.synchronize { @broker_connections.size }}\n"
       end
     end
 
@@ -375,7 +382,8 @@ module Kafkaesque
         api_key: Protocol::MetadataRequest::API_KEY,
         api_version: Protocol::MetadataRequest::API_VERSION,
         correlation_id: next_correlation_id,
-        client_id: @client_id
+        client_id: @client_id,
+        flexible: true
       )
 
       req_header.serialize(req_enc)
@@ -386,7 +394,7 @@ module Kafkaesque
       response_io = conn.read_response
       response_dec = Protocol::Decoder.new(response_io)
 
-      Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
       Protocol::MetadataResponse.deserialize(response_dec)
     end
 
@@ -439,9 +447,10 @@ module Kafkaesque
 
     def connection_for_partition(topic : String, partition : Int32) : Connection
       slot = "#{topic}:#{partition}"
-      node_id = @partition_leaders[slot]? || refresh_partition_metadata(topic, slot)
+      node_id = @metadata_mutex.synchronize { @partition_leaders[slot]? } || refresh_partition_metadata(topic, slot)
+      broker = node_id ? @metadata_mutex.synchronize { @brokers[node_id]? } : nil
 
-      if node_id && (broker = @brokers[node_id]?)
+      if node_id && broker
         get_or_establish_broker_connection(node_id, broker)
       else
         @connection || raise "Client is not connected. Call #connect first."
@@ -451,28 +460,43 @@ module Kafkaesque
     private def refresh_partition_metadata(topic : String, slot : String) : Int32?
       begin
         meta = fetch_metadata([topic])
-        meta.brokers.each do |b|
-          @brokers[b.node_id] = b
-        end
-        meta.topics.each do |t|
-          t.partitions.each do |p|
-            @partition_leaders["#{t.name}:#{p.partition_index}"] = p.leader_id
-            @partition_replicas["#{t.name}:#{p.partition_index}"] = p.replica_nodes
+        @metadata_mutex.synchronize do
+          meta.brokers.each do |b|
+            @brokers[b.node_id] = b
+          end
+          meta.topics.each do |t|
+            @topic_ids[t.name] = t.topic_id
+            t.partitions.each do |p|
+              @partition_leaders["#{t.name}:#{p.partition_index}"] = p.leader_id
+              @partition_leader_epochs["#{t.name}:#{p.partition_index}"] = p.leader_epoch
+              @partition_replicas["#{t.name}:#{p.partition_index}"] = p.replica_nodes
+            end
           end
         end
+      rescue ex
+        Log.debug { "Partition metadata refresh for #{topic} failed: #{ex.message}" }
       end
-      @partition_leaders[slot]?
+      @metadata_mutex.synchronize { @partition_leaders[slot]? }
+    end
+
+    # Topic UUID as returned by the last Metadata refresh (Metadata v10+, KIP-516),
+    # used to build KIP-932 FindCoordinator SHARE keys ("groupId:topicId:partition").
+    def topic_id_for(topic : String) : Bytes?
+      @metadata_mutex.synchronize { @topic_ids[topic]? }
+    end
+
+    # Leader epoch as of the last Metadata refresh (KIP-320) — used both to
+    # fence Fetch requests against a stale/former leader and, after a leader
+    # change, to detect log truncation via OffsetForLeaderEpoch.
+    def leader_epoch_for(topic : String, partition : Int32) : Int32?
+      @metadata_mutex.synchronize { @partition_leader_epochs["#{topic}:#{partition}"]? }
     end
 
     def partitions_count(topic : String) : Int32
-      count = @partition_leaders.keys.count { |k| k.starts_with?("#{topic}:") }
+      count = @metadata_mutex.synchronize { @partition_leaders.keys.count { |k| k.starts_with?("#{topic}:") } }
       if count == 0
-        begin
-          fetch_metadata([topic])
-          count = @partition_leaders.keys.count { |k| k.starts_with?("#{topic}:") }
-        rescue ex
-          # fallback
-        end
+        refresh_partition_metadata(topic, "#{topic}:0")
+        count = @metadata_mutex.synchronize { @partition_leaders.keys.count { |k| k.starts_with?("#{topic}:") } }
       end
       count > 0 ? count : 1
     end
@@ -496,29 +520,45 @@ module Kafkaesque
     end
 
     private def get_or_establish_broker_connection(node_id : Int32, broker : Protocol::Broker) : Connection
-      conn = @broker_connections[node_id]?
-      if conn.nil? || conn.closed?
-        backoff = Backoff.new(base: 100.0, max: 10000.0)
-        attempts = 0
-        loop do
-          begin
-            host = broker.host == "localhost" ? "127.0.0.1" : broker.host
-            conn = Connection.new(host, broker.port, @use_ssl, @ssl_context)
-            @broker_connections[node_id] = conn
-            authenticate_connection(conn)
-            break
-          rescue ex
-            attempts += 1
-            if attempts > @max_retries
-              raise ex
-            end
-            sleep_ms = backoff.compute(attempts)
-            Log.debug { "Failed to establish connection to broker #{node_id} (#{broker.host}:#{broker.port}). Retrying in #{sleep_ms.round(2)}ms..." }
-            sleep sleep_ms.milliseconds
+      existing = @metadata_mutex.synchronize { @broker_connections[node_id]? }
+      return existing if existing && !existing.closed?
+
+      # Connect/retry (network I/O + backoff sleeps) happen outside the lock so
+      # a slow/failing connection to one broker doesn't stall unrelated fibers
+      # (other partitions' fetchers, the metadata-refresh loop, stats, close)
+      # that just need the mutex briefly to touch these hashes.
+      backoff = Backoff.new(base: 100.0, max: 10000.0)
+      attempts = 0
+      conn = nil
+      loop do
+        begin
+          host = broker.host == "localhost" ? "127.0.0.1" : broker.host
+          conn = Connection.new(host, broker.port, @use_ssl, @ssl_context)
+          authenticate_connection(conn)
+          break
+        rescue ex
+          attempts += 1
+          if attempts > @max_retries
+            raise ex
           end
+          sleep_ms = backoff.compute(attempts)
+          Log.debug { "Failed to establish connection to broker #{node_id} (#{broker.host}:#{broker.port}). Retrying in #{sleep_ms.round(2)}ms..." }
+          sleep sleep_ms.milliseconds
         end
       end
-      conn.not_nil!
+      new_conn = conn.not_nil!
+
+      @metadata_mutex.synchronize do
+        # Another fiber may have raced us to establish this connection first;
+        # keep whichever is already stored and discard our redundant one.
+        if (current = @broker_connections[node_id]?) && !current.closed?
+          new_conn.close rescue nil
+          current
+        else
+          @broker_connections[node_id] = new_conn
+          new_conn
+        end
+      end
     end
 
     def on_stats(&block : String -> Void)
@@ -533,7 +573,7 @@ module Kafkaesque
         "produced_messages"  => @produced_messages_count,
         "produced_bytes"     => @produced_bytes_count,
         "consumed_messages"  => @consumed_messages_count,
-        "broker_connections" => @broker_connections.size,
+        "broker_connections" => @metadata_mutex.synchronize { @broker_connections.size },
         "active_coordinator" => @connection.nil? ? false : true,
       }.to_json
 
@@ -603,13 +643,17 @@ module Kafkaesque
       stop_oauth_refresh_fiber
       stop_ssl_reload_fiber
       stop_metrics_server
-      @broker_connections.each_value do |conn|
+      conns = @metadata_mutex.synchronize do
+        snapshot = @broker_connections.values
+        @broker_connections.clear
+        snapshot
+      end
+      conns.each do |conn|
         begin
           conn.close
         rescue
         end
       end
-      @broker_connections.clear
       @connection.try(&.close)
       @connection = nil
     end
@@ -622,7 +666,7 @@ module Kafkaesque
           sleep @metadata_refresh_interval_ms.milliseconds
           break unless @metadata_refresh_running
           begin
-            topics = @partition_leaders.keys.map { |k| k.split(":")[0] }.uniq
+            topics = @metadata_mutex.synchronize { @partition_leaders.keys.map { |k| k.split(":")[0] }.uniq }
             fetch_metadata(topics.empty? ? nil : topics)
           rescue ex
             Log.debug { "Background metadata refresh failed: #{ex.message}" }
@@ -760,14 +804,14 @@ module Kafkaesque
     def closest_replica_connection_for_partition(topic : String, partition : Int32) : Connection
       slot = "#{topic}:#{partition}"
       if rack = @client_rack
-        replicas = @partition_replicas[slot]? || begin
+        replicas = @metadata_mutex.synchronize { @partition_replicas[slot]? } || begin
           refresh_partition_metadata(topic, slot)
-          @partition_replicas[slot]?
+          @metadata_mutex.synchronize { @partition_replicas[slot]? }
         end
 
         if replicas
           replicas.each do |node_id|
-            if broker = @brokers[node_id]?
+            if broker = @metadata_mutex.synchronize { @brokers[node_id]? }
               if broker.rack == rack
                 return get_or_establish_broker_connection(node_id, broker)
               end
@@ -779,43 +823,85 @@ module Kafkaesque
       connection_for_partition(topic, partition)
     end
 
-    def share_fetch(group_id : String, member_id : String, topic : String, partition : Int32, max_bytes : Int32 = 1048576) : Protocol::ShareFetchResponse
-      conn = @connection || raise "Client is not connected. Call #connect first."
+    # Fetches from all given partitions of a topic (identified by topic_id,
+    # KIP-516/932), one ShareFetchRequest per partition leader (mirrors regular
+    # Fetch partition-leader routing), merging the results into a single
+    # response. share_session_epoch follows the KIP-227-style incremental
+    # fetch session protocol: 0 opens/resets the session, -1 closes it,
+    # otherwise the caller's running per-session counter. pending_acks lets
+    # the caller piggyback acknowledgements for previously-fetched records
+    # (keyed by partition) onto this same request.
+    def share_fetch(
+      group_id : String,
+      member_id : String,
+      topic : String,
+      topic_id : Bytes,
+      partitions : Array(Int32),
+      share_session_epoch : Int32,
+      pending_acks : Hash(Int32, Array(Protocol::ShareAcknowledgementBatch)) = {} of Int32 => Array(Protocol::ShareAcknowledgementBatch),
+      max_bytes : Int32 = 1048576,
+    ) : Protocol::ShareFetchResponse
+      by_conn = Hash(Connection, Array(Int32)).new { |h, k| h[k] = [] of Int32 }
+      partitions.each do |partition|
+        conn = connection_for_partition(topic, partition)
+        by_conn[conn] << partition
+      end
 
-      p_req = Protocol::ShareFetchPartition.new(partition, max_bytes)
-      t_req = Protocol::ShareFetchTopic.new(topic, [p_req])
-      req = Protocol::ShareFetchRequest.new(group_id, member_id, [t_req], max_bytes)
+      merged_partitions = [] of Protocol::ShareFetchResponsePartition
+      error_code = 0_i16
+      error_message = nil
+      acquisition_lock_timeout_ms = 0
 
-      req_io = IO::Memory.new
-      req_enc = Protocol::Encoder.new(req_io)
+      by_conn.each do |conn, parts|
+        p_reqs = parts.map { |p| Protocol::ShareFetchPartitionRequest.new(p, pending_acks[p]? || [] of Protocol::ShareAcknowledgementBatch) }
+        t_req = Protocol::ShareFetchTopicRequest.new(topic_id, p_reqs)
+        req = Protocol::ShareFetchRequest.new(group_id, member_id, share_session_epoch, [t_req], max_bytes: max_bytes)
 
-      req_header = Protocol::RequestHeader.new(
-        api_key: Protocol::ShareFetchRequest::API_KEY,
-        api_version: Protocol::ShareFetchRequest::API_VERSION,
-        correlation_id: next_correlation_id,
-        client_id: @client_id,
-        flexible: true
-      )
+        req_io = IO::Memory.new
+        req_enc = Protocol::Encoder.new(req_io)
 
-      req_header.serialize(req_enc)
-      req.serialize(req_enc)
+        req_header = Protocol::RequestHeader.new(
+          api_key: Protocol::ShareFetchRequest::API_KEY,
+          api_version: Protocol::ShareFetchRequest::API_VERSION,
+          correlation_id: next_correlation_id,
+          client_id: @client_id,
+          flexible: true
+        )
 
-      conn.send_request(req_io.to_slice)
+        req_header.serialize(req_enc)
+        req.serialize(req_enc)
 
-      response_io = conn.read_response
-      response_dec = Protocol::Decoder.new(response_io)
+        conn.send_request(req_io.to_slice)
 
-      Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
-      Protocol::ShareFetchResponse.deserialize(response_dec)
+        response_io = conn.read_response
+        response_dec = Protocol::Decoder.new(response_io)
+
+        Protocol::ResponseHeader.deserialize(response_dec, flexible: true)
+        resp = Protocol::ShareFetchResponse.deserialize(response_dec)
+
+        error_code = resp.error_code if resp.error_code != 0
+        error_message ||= resp.error_message
+        acquisition_lock_timeout_ms = resp.acquisition_lock_timeout_ms
+        resp.topics.each { |t| merged_partitions.concat(t.partitions) }
+      end
+
+      Protocol::ShareFetchResponse.new(error_code, error_message, acquisition_lock_timeout_ms, [Protocol::ShareFetchResponseTopic.new(topic_id, merged_partitions)])
     end
 
-    def share_acknowledge(group_id : String, member_id : String, topic : String, partition : Int32, first_offset : Int64, last_offset : Int64, ack_type : Int8) : Protocol::ShareAcknowledgeResponse
-      conn = @connection || raise "Client is not connected. Call #connect first."
+    def share_acknowledge(
+      group_id : String,
+      member_id : String,
+      topic : String,
+      topic_id : Bytes,
+      partition : Int32,
+      share_session_epoch : Int32,
+      batches : Array(Protocol::ShareAcknowledgementBatch),
+    ) : Protocol::ShareAcknowledgeResponse
+      conn = connection_for_partition(topic, partition)
 
-      ack_info = Protocol::ShareAckInfo.new(first_offset, last_offset, ack_type)
-      ack_part = Protocol::ShareAckPartition.new(partition, [ack_info])
-      ack_topic = Protocol::ShareAckTopic.new(topic, [ack_part])
-      req = Protocol::ShareAcknowledgeRequest.new(group_id, member_id, [ack_topic])
+      ack_part = Protocol::ShareAcknowledgePartitionRequest.new(partition, batches)
+      ack_topic = Protocol::ShareAcknowledgeTopicRequest.new(topic_id, [ack_part])
+      req = Protocol::ShareAcknowledgeRequest.new(group_id, member_id, share_session_epoch, [ack_topic])
 
       req_io = IO::Memory.new
       req_enc = Protocol::Encoder.new(req_io)

@@ -9,6 +9,20 @@ module Kafkaesque
     @socket : TCPSocket | OpenSSL::SSL::Socket::Client
     @mutex = Mutex.new
 
+    # KIP-227 incremental fetch session state for Client#fetch_many, which
+    # multiplexes all of a topic's assigned partitions routed to this
+    # connection into a single FetchRequest. Safe to mutate without an
+    # additional lock: #send_request/#read_response already bracket a full
+    # request-response cycle under @mutex, and this state is only ever
+    # touched from within that window. Scoped to a single topic at a time —
+    # fine for the group-managed consumer flow (KIP-848/classic fallback),
+    # which only ever tracks one active subscribed topic; a session on a
+    # different topic resets it (see Client#fetch_many).
+    property fetch_session_id : Int32 = 0
+    property fetch_session_epoch : Int32 = -1
+    property fetch_session_topic : String? = nil
+    property fetch_session_partitions : Set(Int32) = Set(Int32).new
+
     def initialize(@host : String, @port : Int32, @use_ssl : Bool = false, context : OpenSSL::SSL::Context::Client? = nil)
       tcp = TCPSocket.new(@host, @port)
       tcp.tcp_nodelay = true

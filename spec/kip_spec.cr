@@ -132,7 +132,6 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
         "share-group",
         "member-123",
         5,
-        "instance-abc",
         "rack-us-1",
         ["telemetry-topic"]
       )
@@ -146,7 +145,6 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
       dec.read_compact_string.should eq("share-group")
       dec.read_compact_string.should eq("member-123")
       dec.read_int32.should eq(5)
-      dec.read_compact_string.should eq("instance-abc")
       dec.read_compact_string.should eq("rack-us-1")
       dec.read_compact_array { dec.read_compact_string }.should eq(["telemetry-topic"])
     end
@@ -155,22 +153,57 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
 
+      enc.write_int32(0)            # throttle_time_ms
       enc.write_int16(0_i16)        # error_code
       enc.write_compact_string(nil) # error_message
       enc.write_compact_string("member-123")
       enc.write_int32(6)    # member_epoch
       enc.write_int32(5000) # heartbeat_interval
+      enc.write_int8(-1_i8) # has_assignment: null
       enc.write_tag_buffer
 
       io.rewind
       dec = Kafkaesque::Protocol::Decoder.new(io)
       resp = Kafkaesque::Protocol::ShareGroupHeartbeatResponse.deserialize(dec)
 
+      resp.throttle_time_ms.should eq(0)
       resp.error_code.should eq(0)
       resp.error_message.should be_nil
       resp.member_id.should eq("member-123")
       resp.member_epoch.should eq(6)
       resp.heartbeat_interval_ms.should eq(5000)
+      resp.assignment.should be_nil
+    end
+
+    it "deserializes ShareGroupHeartbeatResponse with a populated assignment" do
+      io = IO::Memory.new
+      enc = Kafkaesque::Protocol::Encoder.new(io)
+
+      enc.write_int32(0)     # throttle_time_ms
+      enc.write_int16(0_i16) # error_code
+      enc.write_compact_string(nil)
+      enc.write_compact_string("member-123")
+      enc.write_int32(6)
+      enc.write_int32(5000)
+      enc.write_int8(1_i8) # has_assignment: present
+
+      topic_id = Bytes.new(16, 3_u8)
+      enc.write_compact_array([topic_id]) do |uuid|
+        enc.io.write(uuid)
+        enc.write_compact_array([0, 1]) { |p| enc.write_int32(p) }
+        enc.write_tag_buffer
+      end
+      enc.write_tag_buffer # Assignment tag buffer
+      enc.write_tag_buffer # Response tag buffer
+
+      io.rewind
+      dec = Kafkaesque::Protocol::Decoder.new(io)
+      resp = Kafkaesque::Protocol::ShareGroupHeartbeatResponse.deserialize(dec)
+
+      assignment = resp.assignment.not_nil!
+      assignment.topic_partitions.size.should eq(1)
+      assignment.topic_partitions.first.topic_id.should eq(topic_id)
+      assignment.topic_partitions.first.partitions.should eq([0, 1])
     end
   end
 
@@ -198,6 +231,7 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
       enc.write_int32(99)                                       # subscription_id
       enc.write_compact_array([1_i8]) { |c| enc.write_int8(c) } # accepted_compression_types
       enc.write_int32(30000)                                    # push_interval_ms
+      enc.write_int32(2097152)                                  # telemetry_max_bytes
       enc.write_boolean(true)                                   # delta_temporality
       enc.write_compact_array(["metric-a"]) { |m| enc.write_compact_string(m) }
       enc.write_tag_buffer
@@ -208,6 +242,7 @@ describe "Kafkaesque KIP-511 & KIP-392 Support" do
       resp.client_instance_id.should eq(client_id)
       resp.subscription_id.should eq(99)
       resp.push_interval_ms.should eq(30000)
+      resp.telemetry_max_bytes.should eq(2097152)
       resp.requested_metrics.should eq(["metric-a"])
     end
   end

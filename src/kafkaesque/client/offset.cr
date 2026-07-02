@@ -85,5 +85,38 @@ module Kafkaesque
       Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
       Protocol::ListOffsetsResponse.deserialize(response_dec)
     end
+
+    # KIP-320: ask the partition's current leader for the end offset of
+    # `leader_epoch` — the epoch the caller was fetching under before a
+    # leader change was detected. Used to detect log truncation: if the
+    # returned end_offset is lower than the offset the caller had already
+    # consumed, the previous leader's log was truncated and the caller must
+    # rewind to end_offset rather than continuing from its old position.
+    def offset_for_leader_epoch(topic : String, partition : Int32, current_leader_epoch : Int32, leader_epoch : Int32) : Protocol::OffsetForLeaderEpochResponse
+      conn = connection_for_partition(topic, partition)
+
+      req = Protocol::OffsetForLeaderEpochRequest.new(topic, partition, current_leader_epoch, leader_epoch)
+
+      req_io = IO::Memory.new
+      req_enc = Protocol::Encoder.new(req_io)
+
+      req_header = Protocol::RequestHeader.new(
+        api_key: Protocol::OffsetForLeaderEpochRequest::API_KEY,
+        api_version: Protocol::OffsetForLeaderEpochRequest::API_VERSION,
+        correlation_id: next_correlation_id,
+        client_id: @client_id,
+        flexible: false
+      )
+
+      req_header.serialize(req_enc)
+      req.serialize(req_enc)
+
+      conn.send_request(req_io.to_slice)
+
+      response_io = conn.read_response
+      response_dec = Protocol::Decoder.new(response_io)
+      Protocol::ResponseHeader.deserialize(response_dec, flexible: false)
+      Protocol::OffsetForLeaderEpochResponse.deserialize(response_dec)
+    end
   end
 end

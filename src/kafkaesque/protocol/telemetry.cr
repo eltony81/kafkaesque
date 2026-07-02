@@ -22,6 +22,7 @@ module Kafkaesque
       property subscription_id : Int32
       property accepted_compression_types : Array(Int8)
       property push_interval_ms : Int32
+      property telemetry_max_bytes : Int32
       property delta_temporality : Bool
       property requested_metrics : Array(String)
 
@@ -32,6 +33,7 @@ module Kafkaesque
         @subscription_id,
         @accepted_compression_types,
         @push_interval_ms,
+        @telemetry_max_bytes,
         @delta_temporality,
         @requested_metrics,
       )
@@ -47,6 +49,7 @@ module Kafkaesque
         subscription_id = decoder.read_int32
         accepted_compression_types = decoder.read_compact_array { decoder.read_int8 } || [] of Int8
         push_interval_ms = decoder.read_int32
+        telemetry_max_bytes = decoder.read_int32
         delta_temporality = decoder.read_boolean
         requested_metrics = decoder.read_compact_array { decoder.read_compact_string.to_s } || [] of String
 
@@ -59,6 +62,7 @@ module Kafkaesque
           subscription_id,
           accepted_compression_types,
           push_interval_ms,
+          telemetry_max_bytes,
           delta_temporality,
           requested_metrics
         )

@@ -108,14 +108,15 @@ module Kafkaesque
       property producer_epoch : Int16
       property base_sequence : Int32
       property compression : Int16 = 0_i16
+      property base_offset : Int64 = 0_i64
 
-      def initialize(@records, @producer_id = -1_i64, @producer_epoch = -1_i16, @base_sequence = -1, @compression = 0_i16)
+      def initialize(@records, @producer_id = -1_i64, @producer_epoch = -1_i16, @base_sequence = -1, @compression = 0_i16, @base_offset = 0_i64)
       end
 
       def serialize(io : IO)
         encoder = Encoder.new(io)
 
-        encoder.write_int64(0_i64) # base offset
+        encoder.write_int64(@base_offset) # base offset
         batch_len_pos = encoder.reserve_int32
 
         batch_start_pos = io.pos
@@ -346,8 +347,8 @@ module Kafkaesque
     end
 
     struct FetchRequest
-      API_KEY     = 1_i16
-      API_VERSION = 4_i16
+      API_KEY     =  1_i16
+      API_VERSION = 11_i16 # v11: adds RackId (KIP-392), still non-flexible (flexibleVersions start at 12)
 
       property topic : String
       property partition : Int32
@@ -355,8 +356,10 @@ module Kafkaesque
       property max_bytes : Int32
       property min_bytes : Int32
       property partition_max_bytes : Int32
+      property rack_id : String?
+      property current_leader_epoch : Int32
 
-      def initialize(@topic, @partition, @fetch_offset, @min_bytes = 1, @max_bytes = 1048576, @partition_max_bytes = 1048576)
+      def initialize(@topic, @partition, @fetch_offset, @min_bytes = 1, @max_bytes = 1048576, @partition_max_bytes = 1048576, @rack_id = nil, @current_leader_epoch = -1)
       end
 
       def serialize(encoder : Encoder)
@@ -365,29 +368,40 @@ module Kafkaesque
         encoder.write_int32(@min_bytes) # min_bytes
         encoder.write_int32(@max_bytes) # max_bytes
         encoder.write_int8(0_i8)        # isolation_level
+        encoder.write_int32(0)          # session_id
+        encoder.write_int32(-1)         # session_epoch
 
         encoder.write_array([@topic]) do |topic_name|
           encoder.write_string(topic_name)
           encoder.write_array([@partition]) do |part_idx|
             encoder.write_int32(part_idx)
-            encoder.write_int64(@fetch_offset)        # fetch_offset
-            encoder.write_int32(@partition_max_bytes) # partition_max_bytes
+            encoder.write_int32(@current_leader_epoch) # (KIP-320) fences requests against a stale leader
+            encoder.write_int64(@fetch_offset)         # fetch_offset
+            encoder.write_int64(-1_i64)                # log_start_offset
+            encoder.write_int32(@partition_max_bytes)  # partition_max_bytes
           end
         end
+
+        encoder.write_array([] of String) { } # forgotten_topics_data (no incremental fetch sessions)
+        encoder.write_string(@rack_id || "")  # rack_id (KIP-392): enables broker-side follower-read eligibility
       end
     end
 
     struct FetchResponse
       property error_code : Int16
       property records : Array(Record)
+      property preferred_read_replica : Int32
 
-      def initialize(@error_code, @records)
+      def initialize(@error_code, @records, @preferred_read_replica = -1)
       end
 
       def self.deserialize(decoder : Decoder) : FetchResponse
         decoder.read_int32 # throttle_time_ms
+        decoder.read_int16 # top-level error_code (v7+)
+        decoder.read_int32 # session_id (v7+)
         error_code = 0_i16
         records = [] of Record
+        preferred_read_replica = -1
 
         decoder.read_array do
           topic = decoder.read_string
@@ -396,11 +410,14 @@ module Kafkaesque
             error_code = decoder.read_int16
             high_watermark = decoder.read_int64
             last_stable_offset = decoder.read_int64
+            log_start_offset = decoder.read_int64 # v5+
 
             decoder.read_array do
               decoder.read_int64 # producer_id
               decoder.read_int64 # first_offset
             end
+
+            preferred_read_replica = decoder.read_int32 # v11+
 
             raw_bytes = decoder.read_bytes
             if !raw_bytes.nil? && !raw_bytes.empty?
@@ -409,7 +426,138 @@ module Kafkaesque
           end
         end
 
-        FetchResponse.new(error_code, records)
+        FetchResponse.new(error_code, records, preferred_read_replica)
+      end
+    end
+
+    # A single partition's fetch parameters within a FetchSessionRequest.
+    struct FetchPartitionSpec
+      property partition : Int32
+      property fetch_offset : Int64
+      property current_leader_epoch : Int32
+
+      def initialize(@partition, @fetch_offset, @current_leader_epoch = -1)
+      end
+    end
+
+    # KIP-227 incremental fetch sessions: multiplexes every partition of a
+    # single topic routed to one broker connection into a single request,
+    # tracked by (session_id, session_epoch) rather than one FetchRequest per
+    # partition. `partitions` carries only the partitions being added or
+    # whose fetch_offset changed since the last request on this session —
+    # the broker remembers the rest. `forgotten_partitions` removes
+    # partitions from an already-open session (e.g. after a rebalance
+    # revokes them). session_epoch: 0 opens/resets a session, -1 closes one,
+    # anything else continues it. See Client#fetch_many.
+    struct FetchSessionRequest
+      API_KEY     =  1_i16
+      API_VERSION = 11_i16
+
+      property topic : String
+      property partitions : Array(FetchPartitionSpec)
+      property session_id : Int32
+      property session_epoch : Int32
+      property forgotten_partitions : Array(Int32)
+      property max_bytes : Int32
+      property min_bytes : Int32
+      property partition_max_bytes : Int32
+      property rack_id : String?
+
+      def initialize(@topic, @partitions, @session_id = 0, @session_epoch = 0, @forgotten_partitions = [] of Int32,
+                     @min_bytes = 1, @max_bytes = 1048576, @partition_max_bytes = 1048576, @rack_id = nil)
+      end
+
+      def serialize(encoder : Encoder)
+        encoder.write_int32(-1)         # replica_id
+        encoder.write_int32(1000)       # max_wait_ms
+        encoder.write_int32(@min_bytes) # min_bytes
+        encoder.write_int32(@max_bytes) # max_bytes
+        encoder.write_int8(0_i8)        # isolation_level
+        encoder.write_int32(@session_id)
+        encoder.write_int32(@session_epoch)
+
+        if @partitions.empty?
+          encoder.write_array([] of String) { }
+        else
+          encoder.write_array([@topic]) do |topic_name|
+            encoder.write_string(topic_name)
+            encoder.write_array(@partitions) do |spec|
+              encoder.write_int32(spec.partition)
+              encoder.write_int32(spec.current_leader_epoch)
+              encoder.write_int64(spec.fetch_offset)
+              encoder.write_int64(-1_i64) # log_start_offset
+              encoder.write_int32(@partition_max_bytes)
+            end
+          end
+        end
+
+        if @forgotten_partitions.empty?
+          encoder.write_array([] of String) { }
+        else
+          encoder.write_array([@topic]) do |topic_name|
+            encoder.write_string(topic_name)
+            encoder.write_array(@forgotten_partitions) { |p| encoder.write_int32(p) }
+          end
+        end
+
+        encoder.write_string(@rack_id || "")
+      end
+    end
+
+    struct FetchSessionPartitionResult
+      property error_code : Int16
+      property records : Array(Record)
+      property preferred_read_replica : Int32
+
+      def initialize(@error_code, @records, @preferred_read_replica = -1)
+      end
+    end
+
+    struct FetchSessionResponse
+      property error_code : Int16
+      property session_id : Int32
+      # partition_index => result. Only partitions the broker actually had
+      # something to report on for this response are present — with an
+      # established session, that can be a subset of the full session.
+      property partitions : Hash(Int32, FetchSessionPartitionResult)
+
+      def initialize(@error_code, @session_id, @partitions)
+      end
+
+      def self.deserialize(decoder : Decoder) : FetchSessionResponse
+        decoder.read_int32 # throttle_time_ms
+        error_code = decoder.read_int16
+        session_id = decoder.read_int32
+        partitions = {} of Int32 => FetchSessionPartitionResult
+
+        decoder.read_array do
+          decoder.read_string # topic
+          decoder.read_array do
+            partition_idx = decoder.read_int32
+            part_error_code = decoder.read_int16
+            decoder.read_int64 # high_watermark
+            decoder.read_int64 # last_stable_offset
+            decoder.read_int64 # log_start_offset
+
+            decoder.read_array do
+              decoder.read_int64 # producer_id
+              decoder.read_int64 # first_offset
+            end
+
+            preferred_read_replica = decoder.read_int32
+
+            raw_bytes = decoder.read_bytes
+            records = if !raw_bytes.nil? && !raw_bytes.empty?
+                        RecordBatch.deserialize_from_bytes(raw_bytes, partition: partition_idx)
+                      else
+                        [] of Record
+                      end
+
+            partitions[partition_idx] = FetchSessionPartitionResult.new(part_error_code, records, preferred_read_replica)
+          end
+        end
+
+        FetchSessionResponse.new(error_code, session_id, partitions)
       end
     end
 

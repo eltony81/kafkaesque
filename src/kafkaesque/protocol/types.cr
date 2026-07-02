@@ -7,7 +7,7 @@ module Kafkaesque
       end
 
       def write_int8(val : Int8)
-        @io.write_byte(val.to_u8)
+        @io.write_byte(val.to_u8!)
       end
 
       def write_int16(val : Int16)

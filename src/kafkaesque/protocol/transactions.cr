@@ -50,6 +50,39 @@ module Kafkaesque
       end
     end
 
+    struct AddOffsetsToTxnRequest
+      API_KEY     = 25_i16
+      API_VERSION =  0_i16
+
+      property transactional_id : String
+      property producer_id : Int64
+      property producer_epoch : Int16
+      property group_id : String
+
+      def initialize(@transactional_id, @producer_id, @producer_epoch, @group_id)
+      end
+
+      def serialize(encoder : Encoder)
+        encoder.write_string(@transactional_id)
+        encoder.write_int64(@producer_id)
+        encoder.write_int16(@producer_epoch)
+        encoder.write_string(@group_id)
+      end
+    end
+
+    struct AddOffsetsToTxnResponse
+      property error_code : Int16
+
+      def initialize(@error_code)
+      end
+
+      def self.deserialize(decoder : Decoder) : AddOffsetsToTxnResponse
+        decoder.read_int32 # throttle_time_ms
+        error_code = decoder.read_int16
+        AddOffsetsToTxnResponse.new(error_code)
+      end
+    end
+
     struct EndTxnRequest
       API_KEY     = 26_i16
       API_VERSION =  0_i16

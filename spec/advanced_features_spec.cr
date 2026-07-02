@@ -11,42 +11,15 @@ describe "Kafkaesque Advanced Features" do
   it "successfully executes regex subscription and discovers matching topics" do
     broker = Kafkaesque::MockBroker.new
 
-    # Mock Metadata Request (API KEY 3)
+    # Mock Metadata Request (API KEY 3, v12)
     broker.on_request(3_i16) do |decoder, version|
-      # Skip requested topics array
-      decoder.read_array { decoder.read_string }
-
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
-
-      # 1. Brokers array: 1 broker (this mock broker itself)
-      enc.write_array([nil]) do
-        enc.write_int32(1)            # node_id
-        enc.write_string("127.0.0.1") # host
-        enc.write_int32(broker.port)  # port
-        enc.write_string(nil)         # rack
+      write_mock_metadata_prefix(enc, 1, "127.0.0.1", broker.port)
+      enc.write_compact_array(["sensor-temperature", "sensor-humidity", "system-log"]) do |name|
+        write_mock_metadata_topic(enc, name, [{0, 1}])
       end
-
-      # 2. Cluster ID
-      enc.write_string("mock-cluster")
-      # 3. Controller ID
-      enc.write_int32(1)
-
-      # 4. Topics array
-      enc.write_array(["sensor-temperature", "sensor-humidity", "system-log"]) do |name|
-        enc.write_int16(0_i16) # error_code
-        enc.write_string(name) # name
-        enc.write_int8(0_i8)   # is_internal (false)
-        # Partitions array
-        enc.write_array([nil]) do
-          enc.write_int16(0_i16)           # error_code
-          enc.write_int32(0)               # partition_index
-          enc.write_int32(1)               # leader_id (broker 1)
-          enc.write_array([] of Int32) { } # replicas
-          enc.write_array([] of Int32) { } # isr
-        end
-      end
-
+      enc.write_tag_buffer
       io
     end
 
@@ -74,35 +47,17 @@ describe "Kafkaesque Advanced Features" do
     metadata_calls = 0
     produce_calls = 0
 
-    # Mock Metadata Request (API KEY 3)
+    # Mock Metadata Request (API KEY 3, v12)
     broker.on_request(3_i16) do |decoder, version|
       metadata_calls += 1
-      decoder.read_array { decoder.read_string }
 
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
-
-      enc.write_array([nil]) do
-        enc.write_int32(1)
-        enc.write_string("127.0.0.1")
-        enc.write_int32(broker.port)
-        enc.write_string(nil)
+      write_mock_metadata_prefix(enc, 1, "127.0.0.1", broker.port)
+      enc.write_compact_array(["sensor-temp"]) do |name|
+        write_mock_metadata_topic(enc, name, [{0, 1}]) # Leader is broker 1
       end
-      enc.write_string("mock-cluster")
-      enc.write_int32(1)
-
-      enc.write_array(["sensor-temp"]) do |name|
-        enc.write_int16(0_i16)
-        enc.write_string(name)
-        enc.write_int8(0_i8)
-        enc.write_array([nil]) do
-          enc.write_int16(0_i16)
-          enc.write_int32(0)
-          enc.write_int32(1) # Leader is broker 1
-          enc.write_array([] of Int32) { }
-          enc.write_array([] of Int32) { }
-        end
-      end
+      enc.write_tag_buffer
       io
     end
 
@@ -158,31 +113,15 @@ describe "Kafkaesque Advanced Features" do
     broker = Kafkaesque::MockBroker.new
     produce_calls = 0
 
-    # Mock Metadata Request (API KEY 3)
+    # Mock Metadata Request (API KEY 3, v12)
     broker.on_request(3_i16) do |decoder, version|
-      decoder.read_array { decoder.read_string }
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
-      enc.write_array([nil]) do
-        enc.write_int32(1)
-        enc.write_string("127.0.0.1")
-        enc.write_int32(broker.port)
-        enc.write_string(nil)
+      write_mock_metadata_prefix(enc, 1, "127.0.0.1", broker.port)
+      enc.write_compact_array(["sensor-temp"]) do |name|
+        write_mock_metadata_topic(enc, name, [{0, 1}])
       end
-      enc.write_string("mock-cluster")
-      enc.write_int32(1)
-      enc.write_array(["sensor-temp"]) do |name|
-        enc.write_int16(0_i16)
-        enc.write_string(name)
-        enc.write_int8(0_i8)
-        enc.write_array([nil]) do
-          enc.write_int16(0_i16)
-          enc.write_int32(0)
-          enc.write_int32(1)
-          enc.write_array([] of Int32) { }
-          enc.write_array([] of Int32) { }
-        end
-      end
+      enc.write_tag_buffer
       io
     end
 

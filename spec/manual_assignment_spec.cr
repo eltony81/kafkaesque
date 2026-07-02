@@ -8,46 +8,30 @@ describe "Kafkaesque Manual Partition Assignment" do
     fetch_calls = 0
     heartbeat_calls = 0
 
-    # 1. Mock Metadata Request (API KEY 3)
+    # 1. Mock Metadata Request (API KEY 3, v12)
     broker.on_request(3_i16) do |decoder, version|
       metadata_calls += 1
-      decoder.read_array { decoder.read_string }
 
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
-
-      enc.write_array([nil]) do
-        enc.write_int32(1)
-        enc.write_string("127.0.0.1")
-        enc.write_int32(broker.port)
-        enc.write_string(nil)
+      write_mock_metadata_prefix(enc, 1, "127.0.0.1", broker.port)
+      enc.write_compact_array(["manual-topic"]) do |name|
+        write_mock_metadata_topic(enc, name, [{0, 1}])
       end
-      enc.write_string("mock-cluster")
-      enc.write_int32(1)
-
-      enc.write_array(["manual-topic"]) do |name|
-        enc.write_int16(0_i16)
-        enc.write_string(name)
-        enc.write_int8(0_i8)
-        enc.write_array([nil]) do
-          enc.write_int16(0_i16)
-          enc.write_int32(0) # Partition 0
-          enc.write_int32(1)
-          enc.write_array([] of Int32) { }
-          enc.write_array([] of Int32) { }
-        end
-      end
+      enc.write_tag_buffer
       io
     end
 
-    # 2. Mock Fetch Request (API KEY 1)
+    # 2. Mock Fetch Request (API KEY 1, v11)
     broker.on_request(1_i16) do |decoder, version|
       fetch_calls += 1
 
       io = IO::Memory.new
       enc = Kafkaesque::Protocol::Encoder.new(io)
 
-      enc.write_int32(0) # throttle_time_ms
+      enc.write_int32(0)     # throttle_time_ms
+      enc.write_int16(0_i16) # top-level error_code (v7+)
+      enc.write_int32(0)     # session_id (v7+)
       enc.write_array(["manual-topic"]) do |topic|
         enc.write_string(topic)
         enc.write_array([0]) do |part|
@@ -55,7 +39,9 @@ describe "Kafkaesque Manual Partition Assignment" do
           enc.write_int16(0_i16)         # partition error code
           enc.write_int64(0_i64)         # high_watermark
           enc.write_int64(0_i64)         # last_stable_offset
-          enc.write_array([] of Nil) { } # producer ids array (empty)
+          enc.write_int64(-1_i64)        # log_start_offset (v5+)
+          enc.write_array([] of Nil) { } # aborted_transactions (empty)
+          enc.write_int32(-1)            # preferred_read_replica (v11+)
 
           # Serialize 1 RecordBatch
           record = Kafkaesque::Protocol::Record.new("key".to_slice, "val".to_slice, [] of Kafkaesque::Protocol::RecordHeader)
@@ -72,8 +58,8 @@ describe "Kafkaesque Manual Partition Assignment" do
       io
     end
 
-    # 3. Mock Heartbeat / Join Group (API KEY 84)
-    broker.on_request(84_i16) do |decoder, version|
+    # 3. Mock Heartbeat / Join Group (API KEY 68 - ConsumerGroupHeartbeat, KIP-848)
+    broker.on_request(68_i16) do |decoder, version|
       heartbeat_calls += 1
       io = IO::Memory.new
       io

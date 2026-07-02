@@ -348,7 +348,11 @@ end
 
 ### 6. Unit Testing with Mock Broker
 
-Kafkaesque provides a built-in `MockBroker` to verify your application's consumer or producer logic locally without needing a live Kafka container.
+Kafkaesque provides a built-in `MockBroker` — a real `TCPServer` on a random local port that speaks the actual Kafka wire protocol — to verify your application's consumer or producer logic locally without needing a live Kafka container. It gives you two levels of control, and you can mix them freely within the same test.
+
+#### 6.1 Stateful defaults: `register_topic`
+
+For the common case ("I just need a topic that behaves like a topic"), call `register_topic` and let `MockBroker` handle `Metadata`, `Produce`, and `Fetch` itself — backed by a real in-memory log per partition, serialized through the *same* `Protocol::RecordBatch`/`Record` code the client uses, so it's a genuine wire round trip rather than a hand-rolled approximation.
 
 ```crystal
 require "spec"
@@ -356,48 +360,73 @@ require "kafkaesque"
 require "kafkaesque/mock_broker"
 
 describe "My Kafka Application" do
-  it "successfully publishes message to mock broker" do
-    # Start mock broker on random local port
+  it "produces and reads back messages against the mock broker" do
     broker = Kafkaesque::MockBroker.new
-
-    # Mock response for Produce requests (API KEY 0)
-    broker.on_request(0_i16) do |decoder, version|
-      # Parse or skip request details as desired
-      # and return a serialized ProduceResponse body
-      io = IO::Memory.new
-      enc = Kafkaesque::Protocol::Encoder.new(io)
-
-      # Array of topics (size 1)
-      enc.write_array(["my-topic"]) do |topic|
-        enc.write_string(topic)
-        # Array of partitions (size 1)
-        enc.write_array([0]) do |part|
-          enc.write_int32(part)    # Partition index
-          enc.write_int16(0_i16)   # Success error code
-          enc.write_int64(42_i64)  # Committed base offset
-          enc.write_int64(-1_i64)  # Log append time
-          enc.write_int64(0_i64)   # Log start offset
-        end
-      end
-      enc.write_int32(0) # throttle_time_ms
-      io
-    end
+    broker.register_topic("my-topic", partitions: 3) # default: partitions: 1, node_id: 1
 
     begin
-      # Direct client to connect to local mock broker
       client = Kafkaesque::Client.new("127.0.0.1", broker.port)
       client.connect
 
-      # Produce message
-      resp = client.produce("my-topic", "key", "val")
+      resp = client.produce("my-topic", "key", "val", partition: 0)
       resp.error_code.should eq(0)
-      resp.base_offset.should eq(42)
+      resp.base_offset.should eq(0) # sequential per partition, like a real log
+
+      fetched = client.fetch("my-topic", partition: 0, fetch_offset: 0_i64)
+      fetched.records.first.value.to_s.should eq("val")
     ensure
+      client.close
       broker.close
     end
   end
 end
 ```
+
+`register_topic(name, partitions: 1, node_id: 1)` options:
+
+| Option | Default | Effect |
+| :--- | :---: | :--- |
+| `partitions` | `1` | Partition count returned by `Metadata`; `Produce`/`Fetch` to a partition outside this range come back with `UNKNOWN_TOPIC_OR_PARTITION` (3), matching real broker behavior. |
+| `node_id` | `1` | Leader/replica/ISR node ID reported for every partition of this topic. `MockBroker` only ever listens on one port, so this is metadata bookkeeping (useful for asserting on `client.@broker_connections`, rack-aware routing assertions, etc.), not a second listener. |
+
+A topic name that was never registered returns `UNKNOWN_TOPIC_OR_PARTITION` from the default `Metadata`/`Produce`/`Fetch` handlers, the same way an unmocked API key falls back to a bare `error_code = 0` response for everything else (see 6.3).
+
+Two more API keys have built-in stateful defaults, independent of `register_topic`:
+- **`OffsetCommit`/`OffsetFetch`** (keys 8/9): commits are tracked in-memory keyed by `group_id:topic:partition` and returned by a subsequent fetch — useful for asserting a `Consumer`'s auto-commit or manual `#commit` actually persisted the right offset.
+- **`ApiVersions`** (key 18): returns a minimal but valid advertisement (`Produce`, `Fetch`, `ListOffsets`, `Metadata`, `OffsetCommit`, `OffsetFetch`, `ApiVersions`) so KIP-511 version negotiation doesn't need a handler of its own.
+
+#### 6.2 Custom handlers: `on_request`
+
+For anything the stateful defaults don't cover — specific error codes, partial/garbage responses, asserting on the exact bytes a request sent, coordinator/group/transaction/telemetry/share-group APIs — register a handler per API key. A custom handler always takes priority over the built-in defaults for that key, so you can override just the one API you care about (e.g. inject a `NOT_LEADER_OR_FOLLOWER` on `Fetch` while still using `register_topic`'s defaults for `Metadata`/`Produce`):
+
+```crystal
+broker = Kafkaesque::MockBroker.new
+broker.register_topic("my-topic")
+
+fetch_calls = 0
+broker.on_request(1_i16) do |decoder, version| # Fetch — overrides the default handler
+  fetch_calls += 1
+  io = IO::Memory.new
+  enc = Kafkaesque::Protocol::Encoder.new(io)
+  # ... hand-build the exact response bytes for this scenario ...
+  io
+end
+```
+
+The block receives the already-positioned `Protocol::Decoder` (past the request header — `client_id` and, for flexible versions, the header tag buffer are already consumed) and the request's `api_version`, and must return an `IO::Memory` containing the serialized response *body* (`MockBroker` prepends the correlation ID and, where applicable, the flexible response header tag buffer for you). `Protocol::Encoder`/`Protocol::Decoder` (`src/kafkaesque/protocol/types.cr`) expose the same read/write primitives (fixed-width ints, strings, byte arrays, and their compact/flexible counterparts, plus `write_tag_buffer`/`read_tag_buffer`) the real protocol structs use, so a handler can mirror any real `*Response#serialize`.
+
+Flexible (compact/tagged-field) vs. classic framing is detected automatically per API key/version via `MockBroker::FLEXIBLE_SINCE` — you don't need to special-case it in a handler; write compact vs. fixed-width fields to match whichever version your handler is receiving (check the `version` block argument if a handler needs to support more than one).
+
+#### 6.3 Failure & latency simulation
+
+```crystal
+broker.latency_ms = 250          # sleep before every response (default: 0)
+broker.drop_after_requests = 3   # close the socket after the Nth request, no response sent (default: nil — never drop)
+```
+
+Combine these with a custom `on_request` handler to test retry/backoff logic, timeout handling, or metadata-refresh-on-connection-error paths.
+
+Any API key with **no** custom handler and **no** applicable stateful default (i.e., no topic registered, or an API key like `FindCoordinator`/`ConsumerGroupHeartbeat`/transactions/telemetry you haven't mocked) falls back to a bare 2-byte `error_code = 0` response — enough to unblock a client waiting on *some* response, but rarely what you want to assert against; register a handler for anything your test actually exercises.
 
 ### 7. Production-Ready Client Controls
 
@@ -517,26 +546,31 @@ Kafkaesque implements a native Crystal serialization engine that directly commun
 | API Key | API Name | Protocol Version | Features / Implementation Notes |
 | :---: | :--- | :---: | :--- |
 | **0** | `Produce` | `v7` | Supports message headers, record batching, idempotence metadata (`producer_id`, `producer_epoch`), and transactional envelopes. |
-| **1** | `Fetch` | `v4` | Downloads record batches with key/value extraction and header parsing (routes reads to closest replica under KIP-392). |
+| **1** | `Fetch` | `v11` | Downloads record batches with key/value extraction and header parsing; sends `rack_id` and routes reads to closest replica under KIP-392. **KIP-227**: `Client#fetch_many` multiplexes every assigned partition of a topic routed to the same broker into one incremental-session request (`session_id`/`session_epoch` tracked per `Connection`) instead of one `Fetch` per partition — used by `Consumer#each`'s group-managed flow (KIP-848 and classic fallback). The single-partition `Client#fetch` (no session) remains available for manual assignment and low-level use. |
 | **2** | `ListOffsets` | `v1` | Retrieves logical partition boundary offsets (earliest/latest). |
-| **3** | `Metadata` | `v2` | Resolves topic-partition topology and maps partition leader hosts. |
+| **23** | `OffsetForLeaderEpoch` | `v2` | **KIP-320**: detects log truncation after an unclean leader election — `Client#fetch` calls this automatically on a leader change and rewinds the fetch offset if truncation is found. |
+| **3** | `Metadata` | `v12` | Resolves topic-partition topology, maps partition leader hosts, and resolves topic IDs (KIP-516) for KIP-932. |
 | **8** | `OffsetCommit` | `v2` | Commits individual partition consumer group offsets to coordinator brokers. |
 | **9** | `OffsetFetch` | `v1` | Queries the current group's committed partition offsets. |
-| **10** | `FindCoordinator` | `v2` | Resolves coordinator node endpoints for dynamic consumer groups. |
-| **11** | `JoinGroup` | `v0` | Used during legacy consumer group join. |
-| **14** | `Heartbeat` | `v1` | Keeps legacy consumer dynamic membership heartbeat active. |
+| **10** | `FindCoordinator` | `v2` / `v6` | Resolves coordinator node endpoints; v6 batched form also exposed for SHARE/TRANSACTION key types. |
+| **11** | `JoinGroup` | `v0` | Classic consumer group join, with real `ConsumerProtocolSubscription` metadata (`protocol/consumer_protocol.cr`). `Consumer#each` falls back to this (and 12-14 below) automatically when the broker rejects KIP-848's `ConsumerGroupHeartbeat` with `UNSUPPORTED_VERSION`. |
+| **12** | `Heartbeat` | `v1` | Classic consumer group heartbeat; keeps a fallback-mode session alive and detects `REBALANCE_IN_PROGRESS`. |
+| **13** | `LeaveGroup` | `v1` | Classic consumer group leave, sent on `Consumer#close` when running in fallback mode. |
+| **14** | `SyncGroup` | `v1` | Classic consumer group sync. The elected leader computes every member's assignment via `RangeAssignor` (Kafka's classic default strategy) from their `ConsumerProtocolSubscription`s and submits it here; followers just read back their own assignment. |
 | **17** | `SaslHandshake` | `v1` | Initiates authentication protocols. |
 | **18** | `ApiVersions` | `v3` | **KIP-511 Client Telemetry**: Advertises client software name & version to the broker. |
 | **36** | `SaslAuthenticate` | `v1` | Passes dynamic tokens (Plain or OAuthBearer OIDC access tokens) to the broker. |
 | **22** | `InitProducerId` | `v0` | Fetches a transactional producer ID and current epoch. |
 | **24** | `AddPartitionsToTxn` | `v0` | Registers partitions inside an active transactional transaction context. |
+| **25** | `AddOffsetsToTxn` | `v0` | Registers a consumer group inside an active transaction, ahead of `TxnOffsetCommit` — powers `Producer#send_offsets_to_transaction` for the "consume-transform-produce" EOS pattern. |
 | **26** | `EndTxn` | `v0` | Atomically commits or aborts a multi-partition transaction scope. |
-| **78** | `ShareFetch` | `v0` | **KIP-932 Share Groups**: Pulls queue-based messages from share groups. |
-| **79** | `ShareAcknowledge` | `v0` | **KIP-932 Share Groups**: Acknowledges individual processed queue messages. |
-| **84** | `ConsumerGroupHeartbeat`| `v1` | **KIP-848 Next-Gen Consumer Group Coordination**: Implements server-side partition assignments, rolling memberships, and dynamic balance loops. |
-| **85** | `ShareGroupHeartbeat`| `v0` | **KIP-932 Share Groups**: Heartbeat for share group consumer membership. |
-| **86** | `TelemetrySubscription`| `v0` | **KIP-714 Client Telemetry**: Retrieves active metrics subscriptions from the broker. |
-| **87** | `PushTelemetry` | `v0` | **KIP-714 Client Telemetry**: Pushes collected client performance metrics to the broker. |
+| **28** | `TxnOffsetCommit` | `v0` | Commits a consumer group's offsets as part of an active transaction (see `Producer#send_offsets_to_transaction`). |
+| **78** | `ShareFetch` | `v1` | **KIP-932 Share Groups**: Pulls queue-based messages from share groups (topic-ID addressed, share-session-based). |
+| **79** | `ShareAcknowledge` | `v1` | **KIP-932 Share Groups**: Acknowledges individual processed queue messages. |
+| **68** | `ConsumerGroupHeartbeat`| `v1` | **KIP-848 Next-Gen Consumer Group Coordination**: Implements server-side partition assignments, rolling memberships, and dynamic balance loops. |
+| **76** | `ShareGroupHeartbeat`| `v1` | **KIP-932 Share Groups**: Heartbeat for share group consumer membership (Kafka 4.1.0+; stable protocol version). |
+| **71** | `TelemetrySubscription`| `v0` | **KIP-714 Client Telemetry**: Retrieves active metrics subscriptions from the broker. |
+| **72** | `PushTelemetry` | `v0` | **KIP-714 Client Telemetry**: Pushes collected client performance metrics to the broker. |
 
 ### Features Summary
 1. **Next-Generation Protocols**: Out-of-the-box support for **KIP-848** (Consumer Group Heartbeat v1) and **KIP-932** (Share Groups) for dynamic queue consumption.
